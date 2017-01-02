@@ -1,0 +1,60 @@
+<html>
+	<head><!--{{{-->
+		<meta charset='utf-8'/>
+		<title>GANI editor</title>
+		<script type='application/javascript' src='builders.js'></script>
+		<script type='application/javascript' src='gani-edit.js'></script>
+		<style type='text/css'>
+.part, #preview, .character {
+	position: absolute;
+}
+#preview {
+	width: 100%;
+}
+.part {
+	overflow: hidden;
+}
+.character {
+	top: 0px;
+}
+#spacer, #preview {
+	height: 128px;
+}
+		</style>
+	</head><!--}}}-->
+	<body>
+		<div id='settings'><!--{{{-->
+		</div><!--}}}-->
+		<div id='preview'><!--{{{-->
+		</div>
+		<div id='spacer'></div><!--}}}-->
+		<div><!-- Animation properties. {{{-->
+			<select id='animation' onchange='select_animation()'></select>
+			Rename: <input type='text' onkeydown='namekey(event)'/>
+			<button type='button' onclick='create_animation'>Create Animation</button><br/>
+
+			<label><input type='radio' id='loop' name='type' checked='checked'/>Loop</label><br/>
+			<label><input type='radio' id='freeze' name='type'/>Freeze</label><br/>
+			<label><input type='radio' id='setback' name='type'/>Set back to </label><select id='setbackto'></select><br/>
+		</div><!--}}}-->
+		<div><!-- Frame properties. {{{-->
+			<div id='sprites'><!--{{{-->
+				<table id='spritelist'>
+					<!-- (resource head, remove button
+						(sprite name, x, y, w, h, default file, remove button)*
+						Add sprite button
+						)*
+					-->
+					<tr><td colspan='7'><button type='button' onclick='createresource()'>Create Resource</button></td></tr>
+				</table>
+			</div><!--}}}-->
+			<div id='animation'><!--{{{-->
+				<table id='frames'>
+					<!-- (resource, sprite, x, y, duration, audio, remove button)* -->
+					<tr><td colspan='7'><button type=='button' onclick='newframe()'>Add Frame</button></td></tr>
+				</table>
+			</div><!--}}}-->
+		</div><!--}}}-->
+	</body>
+</html>
+<!-- vim: set foldmethod=marker : -->
