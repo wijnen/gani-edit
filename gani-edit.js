@@ -1,3 +1,4 @@
+// Global variables. {
 // Database of all known ganis.
 var gani = {};
 // Currently previewed gani object.
@@ -10,6 +11,9 @@ var start_time;
 var resources;
 // Whether an animation is currently shown.
 var animating = false;
+// All image files that are available.
+var imgfiles = [];
+// }
 
 // Retrieve a file from gani/ on the server; call cb with result.
 function recv(url, cb, text) {
@@ -17,47 +21,57 @@ function recv(url, cb, text) {
 	xhr.AddEvent('loadend', function() {
 		cb(xhr.responseText);
 	});
-	xhr.open('GET', 'gani/' + url);
+	//console.info(url);
+	xhr.open('GET', url);
 	if (text)
 		xhr.responseType = 'text';
 	xhr.send();
 }
 
+// Startup functions. {
 // This function begins the setup; it is called when the document is loaded.
 AddEvent('load', function() {
 	// Initialize everything.
 	window.get = function(id) { return document.getElementById(id); };
 	recv('find.txt', function(data) {
-		var rawfiles = data.split(/\r?\n/);
-		var files = [];
-		for (var i = 0; i < rawfiles.length; i += 1) {
-			if (rawfiles[i].substring(0, 2) == './' && rawfiles[i].slice(-5) == '.gani')
-				files.push(rawfiles[i].slice(2, -5));
-			else if (rawfiles[i] != '.' && rawfiles[i] != '' && rawfiles[i] != './find.txt')
-				console.warn('strange filename in find.txt', rawfiles[i]);
+		var files = data.split(/\r?\n/);
+		var ganifiles = [];
+		for (var i = 0; i < files.length; i += 1) {
+			if (files[i].match(/^\.\/gani\/[^.].*\.gani$/))
+				ganifiles.push(files[i].slice(7));
+			else if (files[i].match(/^\.\/img\/[^.]+\./))
+				imgfiles.push(files[i].slice(6));
+			else {
+				//console.info('not handled:', files[i]);
+			}
 		}
 		var loadnext = function(data) {
-			var current_gani = files.splice(0, 1);
+			var current_gani = ganifiles.splice(0, 1)[0];
 			var parsed = parse_gani(data);
-			if (parsed !== null)
-				gani[current_gani] = parsed;
-			if (files.length <= 0)
+			if (parsed !== null) {
+				gani[current_gani.slice(0, -5)] = parsed;
+			}
+			if (ganifiles.length <= 0)
 				loadend();
 			else
-				recv(files[0] + '.gani', loadnext, true);
+				recv('gani/' + ganifiles[0], loadnext, true);
 		};
-		if (files.length <= 0)
+		if (ganifiles.length <= 0)
 			loadend();
 		else
-			recv(files[0] + '.gani', loadnext, true);
+			recv('gani/' + ganifiles[0], loadnext, true);
 	}, true);
 });
 
 // This function finishes the setup; it is called when all gani files are loaded.
 function loadend() {
 	// All files are loaded.
+	var i = 0;
 	for (var g in gani) {
+		gani[g].index = i;
 		get('animation').AddElement('option').AddText(g).value = g;
+		get('setbackto').AddElement('option').AddText(g).value = g;
+		i += 1;
 	}
 	select_animation();
 	start_time = performance.now();
@@ -307,63 +321,280 @@ function parse_gani(gani_text) {
 	else
 		return null;
 }
+// }
 
 // This function is called before drawing the next frame on screen.
 function animate() {
+	if (!animating)
+		console.error('animate() called but animating is false');
 	if (current === null) {
 		animating = false;
 		return;
 	}
-	if (!animating)
-		console.error('animate() called but animating is false');
 	var raw_now = performance.now();
 	var now = raw_now - start_time;
+	var update = false;
 	if (now >= current.duration) {
 		if (current.setbackto !== false) {
 			if (typeof(current.setbackto) == 'number') {
-				start_time += current.duration - current.frames[current.setbackto].time;
-				if (raw_now - start_time >= current.duration)
-					start_time = raw_now - current.frames[current.setbackto].time;
-				set_frame(current.setbackto);
+				now -= current.duration - current.frames[current.setbackto].time;
+				current_frame = current.setbackto;
+				//console.info(now);
 			}
-			else
-				set_animation(current.setbackto, start_time + current.duration);
-			return animate();
+			else {
+				if (gani[current.setbackto] === undefined) {
+					console.warn('unable to set animation to undefined setbackto', current.setbackto);
+				}
+				else {
+					now -= current.duration;
+					current_animation = gani[current.setbackto];
+					current_frame = 0;
+				}
+			}
+			update = true;
 		}
-		animating = false;
-		return;
+		if (now >= current_animation.duration) {
+			//console.info(now);
+			current_animation = current;
+			start_time = raw_now;
+			now = 0;
+			update = true;
+		}
 	}
-	while (now >= current.frames[current_frame].time + current.frames[current_frame].wait)
-		set_frame(current_frame + 1);
+	while (now >= current_animation.frames[current_frame].time + current_animation.frames[current_frame].wait) {
+		set_frame(current_animation, current_frame + 1);
+		update = false;
+	}
+	if (update)
+		set_frame(current_animation, current_frame);
 	requestAnimationFrame(animate);
 }
 
+// Helper functions. {
+// Change the current animation, optionally with a start_time.
 function set_animation(name, time) {
 	if (gani[name] === undefined) {
-		name = null;
 		console.warn('Trying to play undefined animation:', name);
+		current = null;
+		return;
 	}
 	current = gani[name];
 	start_time = time !== undefined ? time : performance.now();
 	// Draw first frame on empty screen.
 	get('preview').ClearAll();
 	resources = {};
-	set_frame(0);
+	set_frame(current, 0);
 	if (!animating) {
 		animating = true;
 		requestAnimationFrame(animate);
 	}
+
+	// Update UI.
+	// Setbackto controls. {
+	if (current.setbackto === false)
+		get('freeze').checked = true;
+	else if (typeof(current.setbackto) == 'number')
+		get('loop').checked = true;
+	else {
+		get('setback').checked = true;
+		get('setbackto').selectedIndex = gani[current.setbackto].index;
+	}
+	// }
+	// Single Direction checkbox. {
+	get('onedirection').checked = current.single_dir;
+	// }
+
+	// Sprite and Frames tables. {
+	var table = get('spritelist');
+	var framestable = get('frames');
+	if (table.resources === undefined)
+		table.resources = {};
+	// Remove old values. {
+	for (var r in table.resources) {
+		table.resources[r].heading.parentNode.removeChild(table.resources[r].heading);
+		table.resources[r].image.parentNode.removeChild(table.resources[r].image);
+		table.resources[r].titles.parentNode.removeChild(table.resources[r].titles);
+		table.resources[r].footing.parentNode.removeChild(table.resources[r].footing);
+		table.resources[r].frame.parentNode.removeChild(table.resources[r].frame);
+		for (var s in table.resources[r].sprites) {
+			table.resources[r].sprites[s].row.parentNode.removeChild(table.resources[r].sprites[s].row);
+		}
+		delete table.resources[r];
+	}
+	// }
+	// Fill new sprites table. {
+	var end = get('newresource');
+	for (var s in current.sprites) {
+		var sprite = current.sprites[s];
+		var r;
+		if (table.resources[sprite.resource] === undefined) {
+			r = table.resources[sprite.resource] = {};
+			r.sprites = {};
+			// Create heading. {
+			r.heading = Create('tr');
+			end.parentNode.insertBefore(r.heading, end);
+			var th = r.heading.AddElement('th');
+			th.colSpan = 2;
+			th.AddText('Resource: ' + sprite.resource);
+			th = r.heading.AddElement('th');
+			th.colSpan = 3;
+			var input = th.AddElement('select').AddEvent('change', function() {
+				// TODO: handle file change.
+			});
+			for (var i = 0; i < imgfiles.length; ++i) {
+				var option = input.AddElement('option').AddText(imgfiles[i]);
+				option.value = imgfiles[i];
+				if (imgfiles[i] == current.attrs[sprite.resource])
+					option.selected = true;
+			}
+			r.heading.AddElement('th').AddElement('button', 'removebutton').AddText('Remove').AddEvent('click', function() {
+				// TODO: remove resource.
+			}).type = 'button';
+			// }
+			// Create image. {
+			r.image = Create('tr');
+			var td = r.image.AddElement('td');
+			td.colSpan = 6;
+			var container = td.AddElement('div', 'container');
+			r.box = container.AddElement('div', 'box');
+			var img = container.AddElement('img');
+			img.src = 'img/' + current.attrs[sprite.resource];
+			r.update_box = function() {
+				var info = current.sprites[this.select.options[this.select.selectedIndex].value];
+				this.box.style.left = info.x + 'px';
+				this.box.style.top = info.y + 'px';
+				this.box.style.width = info.w + 'px';
+				this.box.style.height = info.h + 'px';
+			};
+			// Create a local copy of r.
+			(function(r) {
+				r.select = td.AddElement('select').AddEvent('change', function() {
+					r.update_box();
+				});
+			})(r);
+			end.parentNode.insertBefore(r.image, end);
+			// }
+			// Create titles. {
+			r.titles = Create('tr');
+			var titles = ['Sprite', 'X', 'Y', 'Width', 'Height', ''];
+			for (var t = 0; t < titles.length; t += 1)
+				r.titles.AddElement('th').AddText(titles[t]);
+			end.parentNode.insertBefore(r.titles, end);
+			// }
+			// Create footing {
+			r.footing = Create('tr');
+			end.parentNode.insertBefore(r.footing, end);
+			var td = r.footing.AddElement('td');
+			td.colSpan = 6;
+			td.AddElement('button').AddText('Create ' + sprite.resource + ' Sprite').AddEvent('click', function() {
+				// TODO: create new sprite.
+			}).type = 'button';
+			// }
+			// Create frame row {
+			r.frame = framestable.AddElement('tr');
+			r.frame.AddElement('th').AddText(sprite.resource);
+			r.frame.select = [];
+			r.frame.x = [];
+			r.frame.y = [];
+			for (var d = 0; d < 4; d += 1) {
+				td = r.frame.AddElement('td');
+				// Create a local copy of r.
+				(function(r) {
+					r.frame.select.push(td.AddElement('select').AddEvent('change', function() {
+						r.update_frame();
+					}));
+				})(r);
+				r.frame.x.push(r.frame.AddElement('td').AddElement('input'));
+				r.frame.x[d].type = 'number';
+				r.frame.x[d].min = -1000;
+				r.frame.x[d].max = 1000;
+				r.frame.x[d].step = 1;
+				r.frame.y.push(r.frame.AddElement('td').AddElement('input'));
+				r.frame.y[d].type = 'number';
+				r.frame.y[d].min = -1000;
+				r.frame.y[d].max = 1000;
+				r.frame.y[d].step = 1;
+			}
+			r.update_frame = function() {
+				var frameselect = get('frameselect');
+				var selected_frame = frameselect.value;
+				if (selected_frame >= current.frames.length)
+					return;
+				for (var d = 0; d < this.frame.select.length; d += 1) {
+					this.frame.select[d].ClearAll();
+					var data = current.frames[selected_frame].data[d];
+					if (data === undefined) {
+						this.frame.x[d].value = '';
+						this.frame.y[d].value = '';
+						continue;
+					}
+					var i = 0;
+					for (var s in this.sprites) {
+						var option = this.frame.select[d].AddElement('option').AddText(s);
+						option.value = s;
+						var sel = current.frames[selected_frame];
+						if (sel === undefined) {
+							continue;
+						}
+						for (var f = 0; f < data.length; ++f) {
+							if (data[f].sprite == s) {
+								this.frame.select[d].selectedIndex = i;
+								this.frame.x[d].value = data[f].x;
+								this.frame.y[d].value = data[f].y;
+							}
+						}
+						i += 1;
+					}
+				}
+			}
+			// }
+		}
+		r = table.resources[sprite.resource];
+		r.select.AddElement('option').AddText(s).value = s;
+		r.sprites[s] = {};
+		var tr = r.sprites[s].row = Create('tr');
+		end.parentNode.insertBefore(tr, r.footing);
+		var td = tr.AddElement('td');
+		var input = td.AddElement('input').AddEvent('keydown', function(event) {
+			// TODO: handle name change.
+		});
+		input.type = 'text';
+		input.value = s;
+		var props = ['x', 'y', 'w', 'h'];
+		for (var i = 0; i < props.length; i += 1) {
+			td = tr.AddElement('td');
+			input = td.AddElement('input').AddEvent('keydown', function(event) {
+				// TODO: handle property change.
+			});
+			input.type = 'number';
+			input.value = sprite[props[i]];
+		}
+		tr.AddElement('button', 'removebutton').AddText('Remove').AddEvent('click', function() {
+			// TODO: remove sprite.
+		});
+	}
+	// }
+	get('frameselect').max = current.frames.length;
+	// Update all boxes. {
+	for (var r in table.resources) {
+		table.resources[r].update_box();
+	}
+	update_frame();
+	// }
+	// }
 }
 
-function set_frame(frame) {
+// Update the display for a new frame.
+function set_frame(animation, frame) {
+	current_animation = animation;
 	current_frame = frame;
-	var dirs = current.single_dir ? ['50%'] : ['20%', '40%', '60%', '80%'];
+	var dirs = animation.single_dir ? ['50%'] : ['20%', '40%', '60%', '80%'];
 	for (var dir = 0; dir < dirs.length; dir += 1) {
-		var d = current.frames[current_frame].data[dir];
+		var d = animation.frames[frame].data[dir];
 		var parent = get('preview').AddElement('div', 'character');
 		parent.style.left = dirs[dir];
 		for (var i = 0; i < d.length; i += 1) {
-			var sprite = current.sprites[d[i].sprite];
+			var sprite = animation.sprites[d[i].sprite];
 			if (resources[sprite.resource] === undefined)
 				resources[sprite.resource] = [null, null, null, null];
 			if (resources[sprite.resource][dir] === null)
@@ -373,21 +604,30 @@ function set_frame(frame) {
 			part.style.top = (d[i].y + 64) + 'px';
 			part.style.width = sprite.w + 'px';
 			part.style.height = sprite.h + 'px';
-			part.style.backgroundImage = "url('img/" + current.attrs[sprite.resource] + "')";
+			part.style.backgroundImage = "url('img/" + animation.attrs[sprite.resource] + "')";
 			part.style.backgroundPosition = -sprite.x + 'px ' + -sprite.y + 'px';
 		}
 	}
 }
+// }
 
+// UI callback functions. {
 // This function is called when a new animation is selected in the UI.
 function select_animation() {
 	// Respond to a new selection in the animation control.
 	var ani = get('animation');
+	if (ani.options.length <= ani.selectedIndex)
+		return;
 	var cur = ani.options[ani.selectedIndex].value;
 	if (cur == 'Create New') {
 		// TODO: Create new animation.
 	}
 	set_animation(cur == '- ' ? null : cur);
+}
+
+// This function is called when the "one direction" button is toggled.
+function setdirection() {
+	// TODO: Update info.
 }
 
 // This function is called when a key is pressed in the name input box.
@@ -396,21 +636,47 @@ function namekey(event) {
 	if (event.keyCode != 13)
 		return;
 	event.preventDefault();
-	// TODO: Rename animation.
+	var name = get('newname').value;
+	get('newname').value = '';
+	var select = get('animation');
+	var option = select.options[select.selectedIndex];
+	var old_name = option.value;
+	// TODO: make name unique.
+	// Replace content and set value.
+	option.ClearAll().AddText(name).value = name;
+	select = get('setbackto');
+	for (var o = 0; o < select.options.length; ++o) {
+		if (select.options[o].value == old_name) {
+			// Replace content and set value.
+			select.options[o].ClearAll().AddText(name).value = name;
+		}
+	}
+	for (var g in gani) {
+		if (gani[g].setbackto == old_name)
+			gani[g].setbackto = name;
+	}
+	var ani = gani[old_name];
+	delete gani[old_name];
+	gani[name] = ani;
 }
 
-// This function is called when a key is pressed in the category input box.
-function newcategorykey(event) {
-	// FIXME: replace with create/rename.
-	if (event.keyCode != 13)
-		return;
-	event.preventDefault();
-	// TODO: Add new category.
+// This function is called when the "create resource" button is pressed.
+function createresource() {
+	// TODO: Add new resource.
 }
 
 // This functin is called when the "new frame" button is clicked.
 function newframe() {
 	// TODO: Add new frame.
 }
+
+// This functin is called when the "new frame" button is clicked.
+function update_frame() {
+	get('framenum').ClearAll().AddText(get('frameselect').value);
+	var data = get('spritelist').resources
+	for (var r in data)
+		data[r].update_frame();
+}
+// }
 
 // vim: set foldmethod=marker foldmarker={,} :

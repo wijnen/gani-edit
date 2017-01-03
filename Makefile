@@ -1,7 +1,7 @@
 all: gani-edit.html
 
-JSSRC = /usr/share/python3-websocketd/builders.js gani-edit.js
-gani-edit.html: index.html ${JSSRC}
+JSSRC = builders.js gani-edit.js
+gani-edit.html: index.html ${JSSRC} style.css
 	( \
 		sed '/application\/javascript/,$$d' < $< ;\
 		for file in ${JSSRC} ; do \
@@ -9,8 +9,17 @@ gani-edit.html: index.html ${JSSRC}
 			cat $$file ;\
 			echo "</script>" ;\
 		done ;\
-		sed '1,/application\/javascript/d;/application\/javascript/d' < index.html \
+		echo "<style type='text/css'>" ;\
+		cat style.css ;\
+		echo "</style>" ;\
+		sed '1,/text\/css/d' < index.html \
 	) > $@
 
+builders.js: /usr/share/python3-websocketd/builders.js
+	ln -s $< $@
+
 clean:
+	# Don't clean builders.js, because it may be manually installed.
 	rm -f gani-edit.html
+
+.PHONY: clean all

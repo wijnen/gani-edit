@@ -4,23 +4,7 @@
 		<title>GANI editor</title>
 		<script type='application/javascript' src='builders.js'></script>
 		<script type='application/javascript' src='gani-edit.js'></script>
-		<style type='text/css'>
-.part, #preview, .character {
-	position: absolute;
-}
-#preview {
-	width: 100%;
-}
-.part {
-	overflow: hidden;
-}
-.character {
-	top: 0px;
-}
-#spacer, #preview {
-	height: 128px;
-}
-		</style>
+		<link rel='stylesheet' href='style.css'/>
 	</head><!--}}}-->
 	<body>
 		<div id='settings'><!--{{{-->
@@ -28,30 +12,54 @@
 		<div id='preview'><!--{{{-->
 		</div>
 		<div id='spacer'></div><!--}}}-->
-		<div><!-- Animation properties. {{{-->
-			<select id='animation' onchange='select_animation()'></select>
-			Rename: <input type='text' onkeydown='namekey(event)'/>
-			<button type='button' onclick='create_animation'>Create Animation</button><br/>
 
-			<label><input type='radio' id='loop' name='type' checked='checked'/>Loop</label><br/>
-			<label><input type='radio' id='freeze' name='type'/>Freeze</label><br/>
-			<label><input type='radio' id='setback' name='type'/>Set back to </label><select id='setbackto'></select><br/>
+		<div class='border'><!-- Animation properties. {{{-->
+			<input type='checkbox' class='expander' id='aniexpander'/>
+			<label for='aniexpander'><b>Animation Properties</b></label>
+			<div class='expanding'>
+				<select id='animation' onchange='select_animation()'></select>
+				Rename: <input type='text' id='newname' onkeydown='namekey(event)'/>
+				<button type='button' onclick='create_animation'>Create Animation</button><br/>
+
+				<label><input type='radio' id='loop' name='type' checked='checked'/>Loop</label><br/>
+				<label><input type='radio' id='freeze' name='type'/>Freeze</label><br/>
+				<label><input type='radio' id='setback' name='type'/>Set back to </label><select id='setbackto'></select><br/>
+				<label><input type='checkbox' id='onedirection' onchange='setdirection()'/>Single Direction</label>
+			</div>
 		</div><!--}}}-->
-		<div><!-- Frame properties. {{{-->
-			<div id='sprites'><!--{{{-->
+
+		<div class='border'><!-- Sprite properties. {{{-->
+			<input type='checkbox' class='expander' id='spriteexpander'/>
+			<label for='spriteexpander'><b>Sprite Definitions</b></label>
+			<div class='expanding'>
 				<table id='spritelist'>
 					<!-- (resource head, remove button
 						(sprite name, x, y, w, h, default file, remove button)*
 						Add sprite button
 						)*
 					-->
-					<tr><td colspan='7'><button type='button' onclick='createresource()'>Create Resource</button></td></tr>
+					<tr id='newresource'><td colspan='6'><button type='button' onclick='createresource()'>Create Resource</button></td></tr>
 				</table>
-			</div><!--}}}-->
-			<div id='animation'><!--{{{-->
+			</div>
+		</div><!--}}}-->
+
+		<div class='border'><!-- Frame properties. {{{-->
+			<input type='checkbox' class='expander' id='frameexpander'/>
+			<label for='frameexpander'><b>Frame Definitions</b></label>
+			<div class='expanding'><!--{{{-->
+				Frame: <input type='range' min='0' step='1' max='0' id='frameselect' oninput='update_frame()'> <span id='framenum'></span>
+				<button type='button' onclick='newframe()'>Add Frame</button><br/>
+				Hold Time: <input id='time' type='number' min='50' max='10000' value='50' step='50'/> ms<br/>
+				Sound: <select id='sound'></select> <button type='button' onclick='playsound()'>Play</button><br/>
 				<table id='frames'>
-					<!-- (resource, sprite, x, y, duration, audio, remove button)* -->
-					<tr><td colspan='7'><button type=='button' onclick='newframe()'>Add Frame</button></td></tr>
+					<tr><th rowspan='2'>Resource</th><th colspan='3'>Up/Single</th><th colspan='3'>Left</th><th colspan='3'>Down</th><th colspan='3'>Right</th></tr>
+					<tr>
+						<th>Sprite</th><th>X</th><th>Y</th>
+						<th>Sprite</th><th>X</th><th>Y</th>
+						<th>Sprite</th><th>X</th><th>Y</th>
+						<th>Sprite</th><th>X</th><th>Y</th>
+					</tr>
+					<!-- (resource, sprite, x, y)* -->
 				</table>
 			</div><!--}}}-->
 		</div><!--}}}-->

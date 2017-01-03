@@ -1,0 +1,44 @@
+.part, #preview, .character {
+	position: absolute;
+}
+
+#preview {
+	width: 100%;
+}
+
+.part {
+	overflow: hidden;
+}
+
+.character {
+	top: 0px;
+}
+
+#spacer, #preview {
+	height: 128px;
+}
+
+.expander:not(:checked) ~ .expanding {
+	overflow: hidden;
+	height: 0px;
+}
+
+.border {
+	border: solid black 2px;
+	margin: 1ex 1ex;
+	padding: 1ex 1ex;
+	border-radius: 1ex;
+}
+
+.box {
+	border: solid blue 2px;
+	position: absolute;
+}
+
+.container {
+	position: relative;
+}
+
+input[type=number] {
+	width: 6ex;
+}
