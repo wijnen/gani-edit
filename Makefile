@@ -12,7 +12,7 @@ gani-edit.html: index.html ${JSSRC} style.css
 		echo "<style type='text/css'>" ;\
 		cat style.css ;\
 		echo "</style>" ;\
-		sed '1,/text\/css/d' < index.html \
+		sed '1,/stylesheet/d' < index.html \
 	) > $@
 
 builders.js: /usr/share/python3-websocketd/builders.js

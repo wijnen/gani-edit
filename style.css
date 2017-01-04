@@ -1,9 +1,23 @@
-.part, #preview, .character {
+.part, .character {
 	position: absolute;
 }
 
 #preview {
+	top: 0px;
+}
+
+#fpreview {
+	bottom: 0px;
+}
+
+.preview {
+	position: fixed;
 	width: 100%;
+	z-index: -1;
+}
+
+* {
+	z-index: 0;
 }
 
 .part {
@@ -14,7 +28,7 @@
 	top: 0px;
 }
 
-#spacer, #preview {
+.spacer, .preview {
 	height: 128px;
 }
 
@@ -40,5 +54,5 @@
 }
 
 input[type=number] {
-	width: 6ex;
+	width: 8ex;
 }

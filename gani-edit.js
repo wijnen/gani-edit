@@ -1,18 +1,22 @@
 // Global variables. {
 // Database of all known ganis.
 var gani = {};
-// Currently previewed gani object.
+// Currently edited gani object.
 var current = null;
+// Currently previewed gani (with setbackto, this need not be equal to current).
+var current_animation = null;
 // Currently displayed frame in the preview.
 var current_frame;
 // Time (like performance.now()) when current animation was started.
 var start_time;
-// Object with resources as keys, divs as values.
+// Object with preview resources as keys, divs as values.
 var resources;
-// Whether an animation is currently shown.
-var animating = false;
+// Same thing, for the frame preview.
+var fresources;
 // All image files that are available.
 var imgfiles = [];
+// Handle to cancel pending timeout; null if no timeout is pending.
+var timeout = null;
 // }
 
 // Retrieve a file from gani/ on the server; call cb with result.
@@ -36,7 +40,7 @@ AddEvent('load', function() {
 	recv('find.txt', function(data) {
 		var files = data.split(/\r?\n/);
 		var ganifiles = [];
-		for (var i = 0; i < files.length; i += 1) {
+		for (var i = 0; i < files.length; ++i) {
 			if (files[i].match(/^\.\/gani\/[^.].*\.gani$/))
 				ganifiles.push(files[i].slice(7));
 			else if (files[i].match(/^\.\/img\/[^.]+\./))
@@ -71,40 +75,34 @@ function loadend() {
 		gani[g].index = i;
 		get('animation').AddElement('option').AddText(g).value = g;
 		get('setbackto').AddElement('option').AddText(g).value = g;
-		i += 1;
+		++i;
 	}
 	select_animation();
 	start_time = performance.now();
-	requestAnimationFrame(animate);
 }
 
 // Parse a single gani file.
 function parse_gani(gani_text) {
 	// Copied (and edited) from M.GRL source.
 	var ani = {
-		'sprites' : {
-			// 'sprites' is an object, not an array, but all of the keys
-			// are numbers.  Values are objects like so:
-			/*
-			0 : {
-			'hint' : 'Coin Frame 1',
-			'resource': 'COIN',
-			'x': 0,
-			'y': 0,
-			'w': 32,
-			'h': 32,
-			}
-			*/
-		},
-
-		'attrs' : {
-			/*
-			'SPRITES' : 'sprites.png',
-			'HEAD' : 'head19.png',
-			'BODY' : 'body.png',
-			'SWORD' : 'sword1.png',
-			'SHIELD' : 'shield1.png',
-			*/
+		'resources': [
+			// Named resources, in order.
+		],
+		'resource' : {
+			// Resource data, by name.
+			// 'shadow': {
+			//   'file': 'shadow.png',
+			//   'sprites': {
+			//     10: {
+			//       'hint': 'Coin Shadow 1',
+			//       'x': 0,
+			//       'y': 0,
+			//       'w': 32,
+			//       'h': 8,
+			//     },
+			//     ...
+			//   },
+			// }
 		},
 
 		'frames' : [
@@ -115,8 +113,9 @@ function parse_gani(gani_text) {
 					// will be 1 or 4 entries here.
 					// this is determined by 'single dir'
 					[
+						// Every entry here corresponds to a resource.  There are exactly as many entries as members in resources.
 						{
-							'sprite': 608, // num is the key for this.sprites
+							'sprite': 608, // num is the key for this.resource[i].sprites
 							'x': -8,
 							'y': -16,
 						},
@@ -160,7 +159,7 @@ function parse_gani(gani_text) {
 		}
 		var parts = line.split(delim);
 		var params = [];
-		for (var i = 0; i < parts.length; i += 1) {
+		for (var i = 0; i < parts.length; ++i) {
 			var check = parts[i].replace(/^[\s\uFEFF\xA0]+|[\s\uFEFF\xA0]+$/g, '');
 			if (check.length > 0) {
 				params.push(check);
@@ -170,7 +169,7 @@ function parse_gani(gani_text) {
 	};
 
 	var lines = gani_text.split('\n');
-	for (var i = 0; i < lines.length; i += 1) {
+	for (var i = 0; i < lines.length; ++i) {
 		var line = lines[i].replace(/^[\s\uFEFF\xA0]+|[\s\uFEFF\xA0]+$/g, '');
 		if (line.length == 0)
 			continue;
@@ -184,7 +183,7 @@ function parse_gani(gani_text) {
 					'hint' : params.slice(7).join(' '),
 				};
 				var names = ['resource', 'x', 'y', 'w', 'h'];
-				for (var k = 0; k < names.length; k += 1) {
+				for (var k = 0; k < names.length; ++k) {
 					var datum = params[k + 2];
 					var name = names[k];
 					if (datum.match(/^[A-Za-z]+[0-9A-Za-z]*$/))
@@ -196,7 +195,13 @@ function parse_gani(gani_text) {
 							sprite[name] = datum;
 					}
 				}
-				ani.sprites[sprite_id] = sprite;
+				if (ani.resource[sprite.resource] === undefined) {
+					ani.resources.push(sprite.resource);
+					ani.resource[sprite.resource] = {file: null, sprites: {}};
+				}
+				ani.resource[sprite.resource].sprites[sprite_id] = sprite;
+				// This information is not kept up to date, so having it is confusing.
+				delete sprite.resource;
 			}
 
 			// single direction mode
@@ -236,7 +241,12 @@ function parse_gani(gani_text) {
 				var datum = params[1];
 				if (params[1].match(/^\d+$/i))
 					datum = Number(datum);
-				ani.attrs[attr_name] = datum;
+				if (ani.resource[attr_name] === undefined) {
+					console.warn('Setting default value for undefined resource', attr_name);
+					ani.resources.push(attr_name);
+					ani.resource[attr_name] = {file: null, sprites: {}};
+				}
+				ani.resource[attr_name].file = datum;
 			}
 
 			// determine frameset boundaries
@@ -258,13 +268,18 @@ function parse_gani(gani_text) {
 	var parse_frame_defs = function(line) {
 		// parses a single direction's data from a frame line in the
 		// gani file
+		// Return [{sprite: 10, x: 0, y: 18}, ...] with one entry per resource, in order of resources.
 		var defs = split_params(line, ',');
 		var frame = [];
-		for (var k = 0; k < defs.length; k += 1) {
+		for (var i = 0; i < ani.resources.length; ++i)
+			frame.push(null);
+		if (defs.length != frame.length)
+			console.warn('not all resources are defined by frame', line);
+		for (var k = 0; k < defs.length; ++k) {
 			var chunks = split_params(defs[k], ' ');
 			var names = ['sprite', 'x', 'y'];
 			var sprite = {};
-			for (var n = 0; n < names.length; n += 1) {
+			for (var n = 0; n < names.length; ++n) {
 				var name = names[n];
 				var datum = chunks[n];
 				if (datum.match(/^[A-Za-z]+[0-9A-Za-z]*$/))
@@ -272,12 +287,26 @@ function parse_gani(gani_text) {
 				else
 					sprite[name] = Number(datum);
 			}
-			frame.push(sprite);
+			// Find resource.
+			outer: while (true) { // This while is always broken out; it is used to define the point to continue.
+				for (var i = 0; i < ani.resources.length; ++i) {
+					var sprites = ani.resource[ani.resources[i]].sprites;
+					if (sprites[sprite.sprite] !== undefined) {
+						// Resource found.
+						if (frame[i] !== null)
+							console.warn('duplicate sprite definition for resource', ani.resources[i], 'on line', line);
+						frame[i] = sprite;
+						break outer;
+					}
+				}
+				console.warn('Ignoring use of undefined sprite', sprite, 'on line', line);
+				break;
+			}
 		}
 		return frame;
 	};
 
-	for (var i = frames_start; i <= frames_end; i += 1) {
+	for (var i = frames_start; i <= frames_end; ++i) {
 		var line = lines[i].trim();
 		pending_lines.push(line);
 		if (pending_lines.length > frame_size && line.length === 0) {
@@ -289,11 +318,11 @@ function parse_gani(gani_text) {
 				'wait': ani.base_speed,
 				'sound': false,
 			};
-			for (var dir = 0; dir < frame_size; dir += 1) {
+			for (var dir = 0; dir < frame_size; ++dir) {
 				// frame.data.length == 1 for singledir and 4 for multidir
 				frame.data.push(parse_frame_defs(pending_lines[dir]));
 			}
-			for (var k = frame_size; k < pending_lines.length; k += 1) {
+			for (var k = frame_size; k < pending_lines.length; ++k) {
 				var params = split_params(pending_lines[k]);
 				if (params[0] === 'WAIT')
 					frame.wait = ani.base_speed * (Number(params[1]) + 1);
@@ -311,7 +340,7 @@ function parse_gani(gani_text) {
 	}
 
 	// calculate animation duration
-	for (var i = 0; i < ani.frames.length; i += 1) {
+	for (var i = 0; i < ani.frames.length; ++i) {
 		ani.frames[i].time = ani.duration;
 		ani.duration += ani.frames[i].wait;
 	}
@@ -325,11 +354,13 @@ function parse_gani(gani_text) {
 
 // This function is called before drawing the next frame on screen.
 function animate() {
-	if (!animating)
-		console.error('animate() called but animating is false');
+	timeout = null;
 	if (current === null) {
-		animating = false;
 		return;
+	}
+	if (current_animation === null) {
+		current_animation = current;
+		current_frame = 0;
 	}
 	var raw_now = performance.now();
 	var now = raw_now - start_time;
@@ -367,7 +398,8 @@ function animate() {
 	}
 	if (update)
 		set_frame(current_animation, current_frame);
-	requestAnimationFrame(animate);
+	var dt = current_animation.frames[current_frame].time + current_animation.frames[current_frame].wait - now;
+	timeout = setTimeout(animate, dt);
 }
 
 // Helper functions. {
@@ -381,13 +413,10 @@ function set_animation(name, time) {
 	current = gani[name];
 	start_time = time !== undefined ? time : performance.now();
 	// Draw first frame on empty screen.
-	get('preview').ClearAll();
-	resources = {};
 	set_frame(current, 0);
-	if (!animating) {
-		animating = true;
-		requestAnimationFrame(animate);
-	}
+	if (timeout !== null)
+		clearTimeout(timeout);
+	animate();
 
 	// Update UI.
 	// Setbackto controls. {
@@ -407,204 +436,272 @@ function set_animation(name, time) {
 	// Sprite and Frames tables. {
 	var table = get('spritelist');
 	var framestable = get('frames');
-	if (table.resources === undefined)
-		table.resources = {};
 	// Remove old values. {
-	for (var r in table.resources) {
-		table.resources[r].heading.parentNode.removeChild(table.resources[r].heading);
-		table.resources[r].image.parentNode.removeChild(table.resources[r].image);
-		table.resources[r].titles.parentNode.removeChild(table.resources[r].titles);
-		table.resources[r].footing.parentNode.removeChild(table.resources[r].footing);
-		table.resources[r].frame.parentNode.removeChild(table.resources[r].frame);
-		for (var s in table.resources[r].sprites) {
-			table.resources[r].sprites[s].row.parentNode.removeChild(table.resources[r].sprites[s].row);
+	if (table.resources !== undefined) {
+		for (var r = 0; r < table.resources.length; ++r) {
+			table.resources[r].heading.parentNode.removeChild(table.resources[r].heading);
+			table.resources[r].image.parentNode.removeChild(table.resources[r].image);
+			table.resources[r].titles.parentNode.removeChild(table.resources[r].titles);
+			table.resources[r].footing.parentNode.removeChild(table.resources[r].footing);
+			table.resources[r].frame.parentNode.removeChild(table.resources[r].frame);
+			for (var s in table.resources[r].sprites) {
+				table.resources[r].sprites[s].row.parentNode.removeChild(table.resources[r].sprites[s].row);
+			}
 		}
-		delete table.resources[r];
 	}
+	table.resources = [];
 	// }
 	// Fill new sprites table. {
 	var end = get('newresource');
-	for (var s in current.sprites) {
-		var sprite = current.sprites[s];
-		var r;
-		if (table.resources[sprite.resource] === undefined) {
-			r = table.resources[sprite.resource] = {};
-			r.sprites = {};
-			// Create heading. {
-			r.heading = Create('tr');
-			end.parentNode.insertBefore(r.heading, end);
-			var th = r.heading.AddElement('th');
-			th.colSpan = 2;
-			th.AddText('Resource: ' + sprite.resource);
-			th = r.heading.AddElement('th');
-			th.colSpan = 3;
-			var input = th.AddElement('select').AddEvent('change', function() {
-				// TODO: handle file change.
-			});
-			for (var i = 0; i < imgfiles.length; ++i) {
-				var option = input.AddElement('option').AddText(imgfiles[i]);
-				option.value = imgfiles[i];
-				if (imgfiles[i] == current.attrs[sprite.resource])
-					option.selected = true;
-			}
-			r.heading.AddElement('th').AddElement('button', 'removebutton').AddText('Remove').AddEvent('click', function() {
-				// TODO: remove resource.
-			}).type = 'button';
-			// }
-			// Create image. {
-			r.image = Create('tr');
-			var td = r.image.AddElement('td');
-			td.colSpan = 6;
-			var container = td.AddElement('div', 'container');
-			r.box = container.AddElement('div', 'box');
-			var img = container.AddElement('img');
-			img.src = 'img/' + current.attrs[sprite.resource];
-			r.update_box = function() {
-				var info = current.sprites[this.select.options[this.select.selectedIndex].value];
-				this.box.style.left = info.x + 'px';
-				this.box.style.top = info.y + 'px';
-				this.box.style.width = info.w + 'px';
-				this.box.style.height = info.h + 'px';
-			};
-			// Create a local copy of r.
-			(function(r) {
-				r.select = td.AddElement('select').AddEvent('change', function() {
-					r.update_box();
-				});
-			})(r);
-			end.parentNode.insertBefore(r.image, end);
-			// }
-			// Create titles. {
-			r.titles = Create('tr');
-			var titles = ['Sprite', 'X', 'Y', 'Width', 'Height', ''];
-			for (var t = 0; t < titles.length; t += 1)
-				r.titles.AddElement('th').AddText(titles[t]);
-			end.parentNode.insertBefore(r.titles, end);
-			// }
-			// Create footing {
-			r.footing = Create('tr');
-			end.parentNode.insertBefore(r.footing, end);
-			var td = r.footing.AddElement('td');
-			td.colSpan = 6;
-			td.AddElement('button').AddText('Create ' + sprite.resource + ' Sprite').AddEvent('click', function() {
-				// TODO: create new sprite.
-			}).type = 'button';
-			// }
-			// Create frame row {
-			r.frame = framestable.AddElement('tr');
-			r.frame.AddElement('th').AddText(sprite.resource);
-			r.frame.select = [];
-			r.frame.x = [];
-			r.frame.y = [];
-			for (var d = 0; d < 4; d += 1) {
-				td = r.frame.AddElement('td');
-				// Create a local copy of r.
-				(function(r) {
-					r.frame.select.push(td.AddElement('select').AddEvent('change', function() {
-						r.update_frame();
-					}));
-				})(r);
-				r.frame.x.push(r.frame.AddElement('td').AddElement('input'));
-				r.frame.x[d].type = 'number';
-				r.frame.x[d].min = -1000;
-				r.frame.x[d].max = 1000;
-				r.frame.x[d].step = 1;
-				r.frame.y.push(r.frame.AddElement('td').AddElement('input'));
-				r.frame.y[d].type = 'number';
-				r.frame.y[d].min = -1000;
-				r.frame.y[d].max = 1000;
-				r.frame.y[d].step = 1;
-			}
-			r.update_frame = function() {
-				var frameselect = get('frameselect');
-				var selected_frame = frameselect.value;
-				if (selected_frame >= current.frames.length)
-					return;
-				for (var d = 0; d < this.frame.select.length; d += 1) {
-					this.frame.select[d].ClearAll();
-					var data = current.frames[selected_frame].data[d];
-					if (data === undefined) {
-						this.frame.x[d].value = '';
-						this.frame.y[d].value = '';
-						continue;
-					}
-					var i = 0;
-					for (var s in this.sprites) {
-						var option = this.frame.select[d].AddElement('option').AddText(s);
-						option.value = s;
-						var sel = current.frames[selected_frame];
-						if (sel === undefined) {
-							continue;
-						}
-						for (var f = 0; f < data.length; ++f) {
-							if (data[f].sprite == s) {
-								this.frame.select[d].selectedIndex = i;
-								this.frame.x[d].value = data[f].x;
-								this.frame.y[d].value = data[f].y;
-							}
-						}
-						i += 1;
+	for (var index = 0; index < current.resources.length; ++index) { // Insert resources in table.
+		var resource = current.resource[current.resources[index]];
+		var r = {};
+		table.resources.push(r);
+		r.sprites = {};
+		// Create heading. {
+		r.heading = Create('tr');
+		end.parentNode.insertBefore(r.heading, end);
+		var th = r.heading.AddElement('th');
+		th.colSpan = 2;
+		th.AddText('Resource: ' + current.resources[index]);
+		th = r.heading.AddElement('th');
+		th.colSpan = 3;
+		var input = th.AddElement('select').AddEvent('change', function() {
+			// TODO: handle file change.
+		});
+		for (var i = 0; i < imgfiles.length; ++i) {
+			var option = input.AddElement('option').AddText(imgfiles[i]);
+			option.value = imgfiles[i];
+			if (imgfiles[i] == resource.file)
+				option.selected = true;
+		}
+		r.heading.AddElement('th').AddElement('button', 'removebutton').AddText('Remove').AddEvent('click', function() {
+			// TODO: remove resource.
+		}).type = 'button';
+		// }
+		// Create image. {
+		r.image = Create('tr');
+		var td = r.image.AddElement('td');
+		td.colSpan = 7;
+		var container = td.AddElement('div', 'container');
+		r.box = container.AddElement('div', 'box');
+		var img = container.AddElement('img');
+		img.src = 'img/' + resource.file;
+		r.update_box = function() {
+			var selected = this.select.selectedOptions[0].value;
+			var info = this.resource.sprites[selected];
+			this.box.style.left = info.x + 'px';
+			this.box.style.top = info.y + 'px';
+			this.box.style.width = info.w + 'px';
+			this.box.style.height = info.h + 'px';
+		};
+		r.resource = resource;
+		// Sprite selection in Sprite properties frame.
+		r.select = td.AddElement('select').AddEvent('change', function() {
+			this.r.update_box();
+		});
+		r.select.r = r;
+		end.parentNode.insertBefore(r.image, end);
+		// }
+		// Create titles. {
+		r.titles = Create('tr');
+		var titles = ['', 'Sprite', 'X', 'Y', 'Width', 'Height', ''];
+		for (var t = 0; t < titles.length; ++t)
+			r.titles.AddElement('th').AddText(titles[t]);
+		end.parentNode.insertBefore(r.titles, end);
+		// }
+		// Create footing {
+		r.footing = Create('tr');
+		end.parentNode.insertBefore(r.footing, end);
+		var td = r.footing.AddElement('td');
+		td.colSpan = 7;
+		td.AddElement('button').AddText('Create ' + current.resources[index] + ' Sprite').AddEvent('click', function() {
+			// TODO: create new sprite.
+		}).type = 'button';
+		// }
+		// Create frame row {
+		r.frame = framestable.AddElement('tr');
+		r.frame.AddElement('th').AddText(current.resources[index]);
+		// Create 4 of each.
+		r.frame.select = [];
+		r.frame.x = [];
+		r.frame.y = [];
+		for (var d = 0; d < 4; ++d) {
+			td = r.frame.AddElement('td');
+			r.frame.select.push(td.AddElement('select').AddEvent('change', function() {
+				var selected = get('frameselect').value;
+				var data = current.frames[selected].data[this.d];
+				data[this.index].sprite = Number(this.value);
+				this.r.update_frame();
+				set_frame(current, selected, true);
+			}));
+			r.frame.select[d].r = r;
+			r.frame.select[d].index = index;
+			r.frame.select[d].d = d;
+			r.frame.x.push(r.frame.AddElement('td').AddElement('input').AddEvent('input', function() {
+				// Value of X changed.
+				var selected = get('frameselect').value;
+				var data = current.frames[selected].data[this.d];
+				data[this.index].x = Number(this.value);
+				set_frame(current, selected, true);
+			}));
+			r.frame.x[d].type = 'number';
+			r.frame.x[d].index = index;
+			r.frame.x[d].d = d;
+			r.frame.x[d].min = -1000;
+			r.frame.x[d].max = 1000;
+			r.frame.x[d].step = 1;
+			r.frame.y.push(r.frame.AddElement('td').AddElement('input').AddEvent('input', function() {
+				// Value of Y changed.
+				var selected = get('frameselect').value;
+				var data = current.frames[selected].data[this.d];
+				data[this.index].y = Number(this.value);
+				set_frame(current, selected, true);
+			}));
+			r.frame.y[d].type = 'number';
+			r.frame.y[d].index = index;
+			r.frame.y[d].d = d;
+			r.frame.y[d].min = -1000;
+			r.frame.y[d].max = 1000;
+			r.frame.y[d].step = 1;
+		}
+		r.update_frame = function() {
+			var frameselect = get('frameselect');
+			var selected_frame = frameselect.value;
+			if (selected_frame >= current.frames.length)
+				return;
+			for (var d = 0; d < this.frame.select.length; ++d) {
+				this.frame.select[d].ClearAll();
+				var data = current.frames[selected_frame].data[d];
+				if (data === undefined) {
+					this.frame.x[d].value = '';
+					this.frame.y[d].value = '';
+					continue;
+				}
+				for (var s in this.sprites) {
+					var option = this.frame.select[d].AddElement('option').AddText(s);
+					option.value = s;
+					if (data[this.index].sprite == s) {
+						this.frame.select[d].selectedIndex = this.frame.select[d].options.length - 1;
+						this.frame.x[d].value = data[this.index].x;
+						this.frame.y[d].value = data[this.index].y;
 					}
 				}
 			}
-			// }
 		}
-		r = table.resources[sprite.resource];
-		r.select.AddElement('option').AddText(s).value = s;
-		r.sprites[s] = {};
-		var tr = r.sprites[s].row = Create('tr');
-		end.parentNode.insertBefore(tr, r.footing);
-		var td = tr.AddElement('td');
-		var input = td.AddElement('input').AddEvent('keydown', function(event) {
-			// TODO: handle name change.
-		});
-		input.type = 'text';
-		input.value = s;
-		var props = ['x', 'y', 'w', 'h'];
-		for (var i = 0; i < props.length; i += 1) {
-			td = tr.AddElement('td');
-			input = td.AddElement('input').AddEvent('keydown', function(event) {
-				// TODO: handle property change.
+		r.index = index;
+		// }
+		for (var s in resource.sprites) { // Create sprite rows.
+			var sprite = resource.sprites[s];
+			// Option in sprite select in Sprite properties frame.
+			r.select.AddElement('option').AddText(s).value = s;
+			r.sprites[s] = {};
+			r.sprites[s].index = r.select.options.length - 1;
+			// Sprite row in Sprite properties.
+			var tr = r.sprites[s].row = Create('tr');
+			end.parentNode.insertBefore(tr, r.footing);
+			var td = tr.AddElement('td');
+			var input = td.AddElement('button').AddText('Show').AddEvent('click', function() {
+				var select = this.r.select;
+				this.r.select.selectedIndex = this.r.sprites[this.sprite].index;
+				this.r.update_box();
 			});
+			input.r = r;
+			input.sprite = s;
+			input.type = 'button';
+			// Sprite name input.
+			td = tr.AddElement('td');
+			input = td.AddElement('input').AddEvent('input', function() {
+				// Handle name change.
+				var name = this.value;
+				// TODO: make name unique.
+				var old = this.code;
+				current.sprites[name] = current.sprites[old];
+				delete current.sprites[old];
+				for (var f = 0; f < current.frames.length; ++f) {
+					var frame = current.frames[f].data;
+					for (var d = 0; d < frame.length; ++d) {
+						if (frame[d][this.index].sprite == old)
+							frame[d][this.index].sprite = name;
+					}
+				}
+			});
+			input.index = index;
 			input.type = 'number';
-			input.value = sprite[props[i]];
+			input.min = 0;
+			input.step = 1;
+			input.value = s;
+			input.code = s;
+			// Sprite property inputs.
+			var props = ['x', 'y', 'w', 'h'];
+			for (var i = 0; i < props.length; ++i) {
+				td = tr.AddElement('td');
+				input = td.AddElement('input').AddEvent('input', function() {
+					// Handle property change.
+					this.sprite[this.prop] = this.value;
+					// Update the box, for when this sprite is displayed.
+					table.resource[current.resources[this.index]].update_box();
+				});
+				input.prop = props[i];
+				input.sprite = sprite;
+				input.index = index;
+				input.type = 'number';
+				input.value = sprite[props[i]];
+			}
+			// Sprite remove button.
+			tr.AddElement('button', 'removebutton').AddText('Remove').AddEvent('click', function() {
+				// TODO: remove sprite.
+			});
 		}
-		tr.AddElement('button', 'removebutton').AddText('Remove').AddEvent('click', function() {
-			// TODO: remove sprite.
-		});
 	}
+
 	// }
-	get('frameselect').max = current.frames.length;
+	get('frameselect').max = current.frames.length > 0 ? current.frames.length - 1 : 0;
 	// Update all boxes. {
-	for (var r in table.resources) {
+	for (var r = 0; r < table.resources.length; ++r)
 		table.resources[r].update_box();
-	}
 	update_frame();
 	// }
 	// }
 }
 
 // Update the display for a new frame.
-function set_frame(animation, frame) {
-	current_animation = animation;
-	current_frame = frame;
-	var dirs = animation.single_dir ? ['50%'] : ['20%', '40%', '60%', '80%'];
-	for (var dir = 0; dir < dirs.length; dir += 1) {
+function set_frame(animation, frame, frame_preview) {
+	var preview;
+	var r;
+	if (frame_preview) {
+		preview = get('fpreview');
+		fresources = [];
+		r = fresources;
+	}
+	else {
+		current_animation = animation;
+		current_frame = frame;
+		preview = get('preview');
+		resources = [];
+		r = resources;
+	}
+	// r[d] is a direction.
+	// r[d][i] is the div for resource i, direction d.
+	preview.ClearAll();
+	var dirs = animation.single_dir ? ['75%'] : ['60%', '70%', '80%', '90%'];
+	for (var dir = 0; dir < dirs.length; ++dir) {
+		r.push([]);
 		var d = animation.frames[frame].data[dir];
-		var parent = get('preview').AddElement('div', 'character');
+		var parent = preview.AddElement('div', 'character');
 		parent.style.left = dirs[dir];
-		for (var i = 0; i < d.length; i += 1) {
-			var sprite = animation.sprites[d[i].sprite];
-			if (resources[sprite.resource] === undefined)
-				resources[sprite.resource] = [null, null, null, null];
-			if (resources[sprite.resource][dir] === null)
-				resources[sprite.resource][dir] = parent.AddElement('div', 'part');
-			var part = resources[sprite.resource][dir];
+		for (var i = 0; i < d.length; ++i) {
+			//if (frame_preview)
+			//	console.info(dir, i, d[i].sprite);
+			var resource = animation.resource[animation.resources[i]];
+			var sprite = resource.sprites[d[i].sprite];
+			r[dir].push(parent.AddElement('div', 'part'));
+			var part = r[dir][i];
 			part.style.left = d[i].x + 'px';
 			part.style.top = (d[i].y + 64) + 'px';
 			part.style.width = sprite.w + 'px';
 			part.style.height = sprite.h + 'px';
-			part.style.backgroundImage = "url('img/" + animation.attrs[sprite.resource] + "')";
+			part.style.backgroundImage = "url('img/" + resource.file + "')";
 			part.style.backgroundPosition = -sprite.x + 'px ' + -sprite.y + 'px';
 		}
 	}
@@ -618,7 +715,7 @@ function select_animation() {
 	var ani = get('animation');
 	if (ani.options.length <= ani.selectedIndex)
 		return;
-	var cur = ani.options[ani.selectedIndex].value;
+	var cur = ani.selectedOptions[0].value;
 	if (cur == 'Create New') {
 		// TODO: Create new animation.
 	}
@@ -626,8 +723,39 @@ function select_animation() {
 }
 
 // This function is called when the "one direction" button is toggled.
-function setdirection() {
-	// TODO: Update info.
+function set_type() {
+	if (get('freeze').checked)
+		current.setbackto = false;
+	else if (get('loop').checked)
+		current.setbackto = 0;
+	else if (get('setback').checked)
+		current.setbackto = get('setbackto').value;
+	else
+		console.warn('set_type called without a selected type');
+}
+
+// This function is called when the "one direction" button is toggled.
+function set_direction() {
+	current.single_dir = get('onedirection').checked;
+	// If moving to single_dir, delete all other frames; otherwise generate them.
+	for (var f = 0; f < current.frames.length; ++f) {
+		if (current.single_dir)
+			current.frames[f].data = [current.frames[f].data[0]];
+		else while (current.frames[f].data.length < 4) {
+			// Do a deep copy.
+			var src = current.frames[f].data[0];
+			var copy = [];
+			for (var i = 0; i < src.length; ++i) {
+				var keys = ['sprite', 'x', 'y'];
+				var obj = {};
+				for (var k = 0; k < keys.length; ++k)
+					obj[keys[k]] = src[i][keys[k]];
+				copy.push(obj);
+			}
+			current.frames[f].data.push(copy);
+		}
+	}
+	select_animation();
 }
 
 // This function is called when a key is pressed in the name input box.
@@ -639,7 +767,7 @@ function namekey(event) {
 	var name = get('newname').value;
 	get('newname').value = '';
 	var select = get('animation');
-	var option = select.options[select.selectedIndex];
+	var option = select.selectedOptions[0];
 	var old_name = option.value;
 	// TODO: make name unique.
 	// Replace content and set value.
@@ -665,17 +793,35 @@ function createresource() {
 	// TODO: Add new resource.
 }
 
+// This functin is called when the value of the hold time is changed.
+function new_time() {
+	var frame = get('frameselect').value;
+	current.frames[frame].wait = Number(get('time').value);
+	if (current.frames[frame].wait < 50)
+		current.frames[frame].wait = 50;
+	// Recalculate timings. {
+	current.duration = 0;
+	for (var f = 0; f < current.frames.length; ++f) {
+		current.frames[f].time = current.duration;
+		current.duration += current.frames[f].wait;
+	}
+	// }
+}
+
 // This functin is called when the "new frame" button is clicked.
 function newframe() {
 	// TODO: Add new frame.
 }
 
-// This functin is called when the "new frame" button is clicked.
+// This function is called when a new frame is selected.
 function update_frame() {
-	get('framenum').ClearAll().AddText(get('frameselect').value);
+	var frame = Number(get('frameselect').value);
+	get('framenum').ClearAll().AddText(frame);
+	get('time').value = current.frames[frame].wait;
 	var data = get('spritelist').resources
 	for (var r in data)
 		data[r].update_frame();
+	set_frame(current, frame, true);
 }
 // }
 
