@@ -19,12 +19,13 @@
 			<div class='expanding'>
 				<select id='animation' onchange='select_animation()'></select>
 				Rename: <input type='text' id='newname' onkeydown='namekey(event)'/>
-				<button type='button' onclick='create_animation'>Create Animation</button><br/>
+				<button type='button' onclick='create_animation()'>Create Animation</button><br/>
 
 				<label><input type='radio' id='loop' name='type' checked='checked' onclick='set_type()'/>Loop</label><br/>
 				<label><input type='radio' id='freeze' name='type' onclick='set_type()'/>Freeze</label><br/>
 				<label><input type='radio' id='setback' name='type' onclick='set_type()'/>Set back to </label><select id='setbackto' onchange='set_type()'></select><br/>
-				<label><input type='checkbox' id='onedirection' onchange='set_direction()'/>Single Direction</label>
+				<label><input type='checkbox' id='onedirection' onchange='set_direction()'/>Single Direction</label><br/>
+				<button type='button' onclick='save()'>Save</button>
 			</div>
 		</div><!--}}}-->
 

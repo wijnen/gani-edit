@@ -488,7 +488,8 @@ function set_animation(name, time) {
 		var img = container.AddElement('img');
 		img.src = 'img/' + resource.file;
 		r.update_box = function() {
-			var selected = this.select.selectedOptions[0].value;
+			var selected = this.selectvalues[this.select.value];
+			this.selectvalue.ClearAll().AddText(selected);
 			var info = this.resource.sprites[selected];
 			this.box.style.left = info.x + 'px';
 			this.box.style.top = info.y + 'px';
@@ -497,9 +498,14 @@ function set_animation(name, time) {
 		};
 		r.resource = resource;
 		// Sprite selection in Sprite properties frame.
-		r.select = td.AddElement('select').AddEvent('change', function() {
+		r.select = td.AddElement('input').AddEvent('input', function() {
 			this.r.update_box();
 		});
+		r.select.type = 'range';
+		r.select.min = 0;
+		r.select.value = 0;
+		r.selectvalue = td.AddElement('span');
+		r.selectvalues = [];
 		r.select.r = r;
 		end.parentNode.insertBefore(r.image, end);
 		// }
@@ -594,9 +600,9 @@ function set_animation(name, time) {
 		for (var s in resource.sprites) { // Create sprite rows.
 			var sprite = resource.sprites[s];
 			// Option in sprite select in Sprite properties frame.
-			r.select.AddElement('option').AddText(s).value = s;
+			r.selectvalues.push(s);
 			r.sprites[s] = {};
-			r.sprites[s].index = r.select.options.length - 1;
+			r.sprites[s].index = r.selectvalues.length - 1;
 			// Sprite row in Sprite properties.
 			var tr = r.sprites[s].row = Create('tr');
 			end.parentNode.insertBefore(tr, r.footing);
@@ -653,6 +659,7 @@ function set_animation(name, time) {
 				// TODO: remove sprite.
 			});
 		}
+		r.select.max = r.selectvalues.length - 1;
 	}
 
 	// }
@@ -705,6 +712,59 @@ function set_frame(animation, frame, frame_preview) {
 			part.style.backgroundPosition = -sprite.x + 'px ' + -sprite.y + 'px';
 		}
 	}
+}
+
+// This function creates gani text from animation data.
+function make_gani(ani) {
+	var ret = 'GANI0001\n';
+
+	// Sprite definitions.
+	for (var r = 0; r < ani.resources.length; ++r) {
+		var rname = ani.resources[r];
+		var resource = ani.resource[rname];
+		for (var s in resource.sprites) {
+			ret += 'SPRITE\t' + s + '\t' + rname.toUpperCase();
+			var props = ['x', 'y', 'w', 'h', 'hint'];
+			for (var p = 0; p < props.length; ++p)
+				ret += '\t' + resource.sprites[s][props[p]];
+			ret += '\n';
+		}
+	}
+	ret += '\n';
+
+	// Global settings.
+	if (ani.setbackto === false) {
+		// Do nothing.
+	}
+	else if (ani.setbackto == 0)
+		ret += 'LOOP\nCONTINUOUS\n';
+	else
+		ret += 'CONTINUOUS\nSETBACKTO ' + ani.setbackto + '\n';
+	for (var r = 0; r < ani.resources.length; ++r) {
+		var rname = ani.resources[r];
+		ret += 'DEFAULT' + rname.toUpperCase() + '\t' + ani.resource[rname].file + '\n';
+	}
+	ret += '\n';
+
+	// Animation.
+	ret += 'ANI\n';
+	for (var f = 0; f < ani.frames.length; ++f) {
+		var frame = ani.frames[f];
+		for (var d = 0; d < frame.data.length; ++d) {
+			var data = frame.data[d];
+			sep = '';
+			for (var r = 0; r < data.length; ++r) {
+				ret += sep + '\t' + data[r].sprite + '\t' + data[r].x + '\t' + data[r].y;
+				sep = ',';
+			}
+			ret += '\n';
+		}
+		if (frame.wait != ani.base_speed)
+			ret += 'WAIT ' + (frame.wait / ani.base_speed - 1) + '\n';
+		ret += '\n';
+	}
+	ret += 'ANIEND\n';
+	return ret;
 }
 // }
 
@@ -822,6 +882,17 @@ function update_frame() {
 	for (var r in data)
 		data[r].update_frame();
 	set_frame(current, frame, true);
+}
+
+// This functin is called when the "save" button is clicked.
+function save() {
+	var data = make_gani(current);
+	var a = Create('a');
+	a.href = 'data:text/plain;charset=utf-8,' + encodeURIComponent(data);
+	a.download = get('animation').selectedOptions[0].value + '.gani';
+	var event = document.createEvent('MouseEvents');
+	event.initEvent('click', true, true);
+	a.dispatchEvent(event);
 }
 // }
 
