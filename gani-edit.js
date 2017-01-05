@@ -467,8 +467,15 @@ function set_animation(name, time) {
 		th = r.heading.AddElement('th');
 		th.colSpan = 3;
 		var input = th.AddElement('select').AddEvent('change', function() {
-			// TODO: handle file change.
+			// Handle file change.
+			this.resource.file = this.selectedOptions[0].value;
+			this.img.src = 'img/' + this.resource.file;
+			// Update animations, they may be using this image.
+			var selected = get('frameselect').value;
+			set_frame(current, selected, true);
+			set_frame(current_animation, current_frame);
 		});
+		input.resource = resource;
 		for (var i = 0; i < imgfiles.length; ++i) {
 			var option = input.AddElement('option').AddText(imgfiles[i]);
 			option.value = imgfiles[i];
@@ -485,8 +492,8 @@ function set_animation(name, time) {
 		td.colSpan = 7;
 		var container = td.AddElement('div', 'container');
 		r.box = container.AddElement('div', 'box');
-		var img = container.AddElement('img');
-		img.src = 'img/' + resource.file;
+		input.img = container.AddElement('img');
+		input.img.src = 'img/' + resource.file;
 		r.update_box = function() {
 			var selected = this.selectvalues[this.select.value];
 			this.selectvalue.ClearAll().AddText(selected);
