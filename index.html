@@ -48,8 +48,8 @@
 			<input type='checkbox' class='expander' id='frameexpander'/>
 			<label for='frameexpander'><b>Frame Definitions</b></label>
 			<div class='expanding'><!--{{{-->
-				Frame: <input type='range' min='0' step='1' max='0' id='frameselect' oninput='update_frame()'> <span id='framenum'></span>
-				<button type='button' onclick='newframe()'>Add Frame</button><br/>
+				Number of Frames: <input type='number' min='1' id='numframes' onchange='change_num_frames()'/><br/>
+				Frame: <input type='range' min='0' step='1' max='0' id='frameselect' oninput='update_frame()'/> <span id='framenum'></span><br/>
 				Hold Time: <input id='time' type='number' min='50' max='10000' value='50' step='50' oninput='new_time()'/> ms<br/>
 				Sound: <select id='sound'></select> <button type='button' onclick='playsound()'>Play</button><br/>
 				<table id='frames'>

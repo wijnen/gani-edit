@@ -89,18 +89,24 @@ function parse_gani(gani_text) {
 			// Named resources, in order.
 		],
 		'resource' : {
-			// Resource data, by name.
+			// Resource data, by name; name is the base, actual names are base + ix * dx + iy.
 			// 'shadow': {
 			//   'file': 'shadow.png',
 			//   'sprites': {
-			//     10: {
+			//     10: {	// unless num_x == num_y == 1, name % 10 == 0.
 			//       'hint': 'Coin Shadow 1',
-			//       'x': 0,
-			//       'y': 0,
+			//       'x': 0,	// + ix * w
+			//       'y': 0,	// + iy * h
 			//       'w': 32,
 			//       'h': 8,
+			//	 'num_x': 4,
+			//       'num_y': 6,
+			//       'dx': 10,	// or 1, if num_y == 1.
 			//     },
 			//     ...
+			//   },
+			//   'lookup': {
+			//     123: [100, 3, 2], ...	// base, nx, ny
 			//   },
 			// }
 		},
@@ -197,9 +203,10 @@ function parse_gani(gani_text) {
 				}
 				if (ani.resource[sprite.resource] === undefined) {
 					ani.resources.push(sprite.resource);
-					ani.resource[sprite.resource] = {file: null, sprites: {}};
+					ani.resource[sprite.resource] = {file: null, sprites: {}, lookup: {}};
 				}
 				ani.resource[sprite.resource].sprites[sprite_id] = sprite;
+				ani.resource[sprite.resource].lookup[sprite_id] = [sprite_id, 0, 0];
 				// This information is not kept up to date, so having it is confusing.
 				delete sprite.resource;
 			}
@@ -244,7 +251,7 @@ function parse_gani(gani_text) {
 				if (ani.resource[attr_name] === undefined) {
 					console.warn('Setting default value for undefined resource', attr_name);
 					ani.resources.push(attr_name);
-					ani.resource[attr_name] = {file: null, sprites: {}};
+					ani.resource[attr_name] = {file: null, sprites: {}, lookup: {}};
 				}
 				ani.resource[attr_name].file = datum;
 			}
@@ -345,6 +352,48 @@ function parse_gani(gani_text) {
 		ani.duration += ani.frames[i].wait;
 	}
 
+	// combine sprite blocks into single definition.
+	for (var i = 0; i < ani.resources.length; ++i) {
+		var r = ani.resource[ani.resources[i]];
+		// combine y sequences first.
+		var names = [];
+		for (var n in r.sprites)
+			names.push(Number(n));
+		names.sort();
+		var base = names[0];
+		r.sprites[base].num_y = 1;
+		for (var n = 1; n < names.length; ++n) {
+			if (base % 10 == 0 && r.sprites[names[n]].w == r.sprites[base].w && r.sprites[names[n]].h == r.sprites[base].h && names[n] - base < 10 && names[n] == names[n - 1] + 1 && r.sprites[names[n]].x == r.sprites[base].x && r.sprites[names[n]].y == r.sprites[base].y + (names[n] - base) * r.sprites[base].h) {
+				r.sprites[base].num_y += 1;
+				r.lookup[names[n]] = [base, 0, r.sprites[base].num_y - 1];
+				delete r.sprites[names[n]];
+			}
+			else {
+				base = names[n];
+				r.sprites[base].num_y = 1;
+			}
+		}
+		// now combine x sequences.
+		names = [];
+		for (var n in r.sprites)
+			names.push(Number(n));
+		names.sort();
+		base = names[0];
+		r.sprites[base].num_x = 1;
+		r.sprites[base].dx = r.sprites[base].num_y > 1 ? 10 : 1;
+		for (var n = 1; n < names.length; ++n) {
+			if (base % r.sprites[base].dx == 0 && r.sprites[names[n]].w == r.sprites[base].w && r.sprites[names[n]].h == r.sprites[base].h && names[n] == names[n - 1] + r.sprites[base].dx && r.sprites[names[n]].y == r.sprites[base].y && r.sprites[names[n]].x == r.sprites[base].x + (names[n] - base) / r.sprites[base].dx * r.sprites[base].w && r.sprites[names[n]].num_y == r.sprites[base].num_y) {
+				r.sprites[base].num_x += 1;
+				for (var k = 0; k < r.sprites[names[n]].num_y; ++k)
+					r.lookup[names[n] + k] = [base, r.sprites[base].num_x - 1, r.lookup[names[n] + k][2]];
+				delete r.sprites[names[n]];
+			}
+			else {
+				base = names[n];
+				r.sprites[base].num_x = 1;
+			}
+		}
+	}
 	if (ani.frames.length > 0)
 		return ani;
 	else
@@ -410,6 +459,7 @@ function set_animation(name, time) {
 		current = null;
 		return;
 	}
+	get('newname').value = name;
 	current = gani[name];
 	start_time = time !== undefined ? time : performance.now();
 	// Draw first frame on empty screen.
@@ -462,10 +512,10 @@ function set_animation(name, time) {
 		r.heading = Create('tr');
 		end.parentNode.insertBefore(r.heading, end);
 		var th = r.heading.AddElement('th');
-		th.colSpan = 2;
+		th.colSpan = 3;
 		th.AddText('Resource: ' + current.resources[index]);
 		th = r.heading.AddElement('th');
-		th.colSpan = 3;
+		th.colSpan = 5;
 		var input = th.AddElement('select').AddEvent('change', function() {
 			// Handle file change.
 			this.resource.file = this.selectedOptions[0].value;
@@ -482,14 +532,14 @@ function set_animation(name, time) {
 			if (imgfiles[i] == resource.file)
 				option.selected = true;
 		}
-		r.heading.AddElement('th').AddElement('button', 'removebutton').AddText('Remove').AddEvent('click', function() {
+		r.heading.AddElement('td').AddElement('button', 'removebutton').AddText('Remove').AddEvent('click', function() {
 			// TODO: remove resource.
 		}).type = 'button';
 		// }
 		// Create image. {
 		r.image = Create('tr');
 		var td = r.image.AddElement('td');
-		td.colSpan = 7;
+		td.colSpan = 9;
 		var container = td.AddElement('div', 'container');
 		r.box = container.AddElement('div', 'box');
 		input.img = container.AddElement('img');
@@ -497,11 +547,22 @@ function set_animation(name, time) {
 		r.update_box = function() {
 			var selected = this.selectvalues[this.select.value];
 			this.selectvalue.ClearAll().AddText(selected);
-			var info = this.resource.sprites[selected];
-			this.box.style.left = info.x + 'px';
-			this.box.style.top = info.y + 'px';
-			this.box.style.width = info.w + 'px';
-			this.box.style.height = info.h + 'px';
+			var bxy = this.resource.lookup[selected];
+			var info = this.resource.sprites[bxy[0]];
+			this.box.style.left = info.x - 4 + 'px';
+			this.box.style.top = info.y - 4 + 'px';
+			this.box.style.width = info.w * info.num_x - 1 + 'px';
+			this.box.style.height = info.h * info.num_y - 1 + 'px';
+			this.box.ClearAll();
+			for (var y = 0; y < info.num_y; ++y) {
+				for (var x = 0; x < info.num_x; ++x) {
+					var cell = this.box.AddElement('div', x == bxy[1] && y == bxy[2] ? 'selectedcell' : 'cell');
+					cell.style.left = x * info.w + 1;
+					cell.style.top = y * info.h + 1;
+					cell.style.width = info.w - 1;
+					cell.style.height = info.h - 1;
+				}
+			}
 		};
 		r.resource = resource;
 		// Sprite selection in Sprite properties frame.
@@ -518,7 +579,7 @@ function set_animation(name, time) {
 		// }
 		// Create titles. {
 		r.titles = Create('tr');
-		var titles = ['', 'Sprite', 'X', 'Y', 'Width', 'Height', ''];
+		var titles = ['', 'Sprite', 'X', 'Y', 'Width', 'Height', '#X', '#Y', ''];
 		for (var t = 0; t < titles.length; ++t)
 			r.titles.AddElement('th').AddText(titles[t]);
 		end.parentNode.insertBefore(r.titles, end);
@@ -527,7 +588,7 @@ function set_animation(name, time) {
 		r.footing = Create('tr');
 		end.parentNode.insertBefore(r.footing, end);
 		var td = r.footing.AddElement('td');
-		td.colSpan = 7;
+		td.colSpan = 9;
 		td.AddElement('button').AddText('Create ' + current.resources[index] + ' Sprite').AddEvent('click', function() {
 			// TODO: create new sprite.
 		}).type = 'button';
@@ -591,7 +652,7 @@ function set_animation(name, time) {
 					this.frame.y[d].value = '';
 					continue;
 				}
-				for (var s in this.sprites) {
+				for (var s in this.resource.lookup) {
 					var option = this.frame.select[d].AddElement('option').AddText(s);
 					option.value = s;
 					if (data[this.index].sprite == s) {
@@ -604,28 +665,36 @@ function set_animation(name, time) {
 		}
 		r.index = index;
 		// }
-		for (var s in resource.sprites) { // Create sprite rows.
-			var sprite = resource.sprites[s];
-			// Option in sprite select in Sprite properties frame.
-			r.selectvalues.push(s);
-			r.sprites[s] = {};
-			r.sprites[s].index = r.selectvalues.length - 1;
+		var names = [];
+		for (var s in resource.lookup)
+			names.push(Number(s));
+		names.sort();
+		var spritelist = [];
+		for (var s = 0; s < names.length; ++s) {
+			r.selectvalues.push(names[s]);
+			var bxy = resource.lookup[names[s]];
+			if (bxy[1] == 0 && bxy[2] == 0)
+				spritelist.push([bxy[0], r.selectvalues.length - 1]);
+		}
+		for (var s = 0; s < spritelist.length; ++s) { // Create sprite rows.
+			var sprite = resource.sprites[spritelist[s][0]];
+			r.sprites[spritelist[s][0]] = {index: spritelist[s][1]};
 			// Sprite row in Sprite properties.
-			var tr = r.sprites[s].row = Create('tr');
+			var tr = r.sprites[spritelist[s][0]].row = Create('tr');
 			end.parentNode.insertBefore(tr, r.footing);
 			var td = tr.AddElement('td');
 			var input = td.AddElement('button').AddText('Show').AddEvent('click', function() {
 				var select = this.r.select;
-				this.r.select.selectedIndex = this.r.sprites[this.sprite].index;
+				this.r.select.value = this.r.sprites[this.sprite].index;
 				this.r.update_box();
 			});
 			input.r = r;
-			input.sprite = s;
+			input.sprite = spritelist[s][0];
 			input.type = 'button';
 			// Sprite name input.
 			td = tr.AddElement('td');
-			input = td.AddElement('input').AddEvent('input', function() {
-				// Handle name change.
+			input = td.AddElement('input').AddEvent('change', function() {
+				// Handle sprite name change.
 				var name = this.value;
 				// TODO: make name unique.
 				var old = this.code;
@@ -643,10 +712,10 @@ function set_animation(name, time) {
 			input.type = 'number';
 			input.min = 0;
 			input.step = 1;
-			input.value = s;
-			input.code = s;
+			input.value = spritelist[s][0];
+			input.code = spritelist[s][0];
 			// Sprite property inputs.
-			var props = ['x', 'y', 'w', 'h'];
+			var props = ['x', 'y', 'w', 'h', 'num_x', 'num_y'];
 			for (var i = 0; i < props.length; ++i) {
 				td = tr.AddElement('td');
 				input = td.AddElement('input').AddEvent('input', function() {
@@ -662,7 +731,7 @@ function set_animation(name, time) {
 				input.value = sprite[props[i]];
 			}
 			// Sprite remove button.
-			tr.AddElement('button', 'removebutton').AddText('Remove').AddEvent('click', function() {
+			tr.AddElement('td').AddElement('button', 'removebutton').AddText('Remove').AddEvent('click', function() {
 				// TODO: remove sprite.
 			});
 		}
@@ -671,6 +740,7 @@ function set_animation(name, time) {
 
 	// }
 	get('frameselect').max = current.frames.length > 0 ? current.frames.length - 1 : 0;
+	get('numframes').value = current.frames.length;
 	// Update all boxes. {
 	for (var r = 0; r < table.resources.length; ++r)
 		table.resources[r].update_box();
@@ -708,7 +778,9 @@ function set_frame(animation, frame, frame_preview) {
 			//if (frame_preview)
 			//	console.info(dir, i, d[i].sprite);
 			var resource = animation.resource[animation.resources[i]];
-			var sprite = resource.sprites[d[i].sprite];
+			var s = d[i].sprite;
+			var info = resource.lookup[s];
+			var sprite = resource.sprites[info[0]];
 			r[dir].push(parent.AddElement('div', 'part'));
 			var part = r[dir][i];
 			part.style.left = d[i].x + 'px';
@@ -716,7 +788,7 @@ function set_frame(animation, frame, frame_preview) {
 			part.style.width = sprite.w + 'px';
 			part.style.height = sprite.h + 'px';
 			part.style.backgroundImage = "url('img/" + resource.file + "')";
-			part.style.backgroundPosition = -sprite.x + 'px ' + -sprite.y + 'px';
+			part.style.backgroundPosition = -(sprite.x + info[1] * sprite.w) + 'px ' + -(sprite.y + info[2] * sprite.h) + 'px';
 		}
 	}
 }
@@ -729,11 +801,16 @@ function make_gani(ani) {
 	for (var r = 0; r < ani.resources.length; ++r) {
 		var rname = ani.resources[r];
 		var resource = ani.resource[rname];
-		for (var s in resource.sprites) {
+		for (var s in resource.lookup) {
 			ret += 'SPRITE\t' + s + '\t' + rname.toUpperCase();
-			var props = ['x', 'y', 'w', 'h', 'hint'];
+			var bxy = resource.lookup[s];
+			var sprite = resource.sprites[bxy[0]];
+			console.info(sprite);
+			ret += '\t' + (sprite.x + bxy[1] * sprite.w);
+			ret += '\t' + (sprite.y + bxy[2] * sprite.h);
+			var props = ['w', 'h', 'hint'];
 			for (var p = 0; p < props.length; ++p)
-				ret += '\t' + resource.sprites[s][props[p]];
+				ret += '\t' + sprite[props[p]];
 			ret += '\n';
 		}
 	}
@@ -832,27 +909,33 @@ function namekey(event) {
 		return;
 	event.preventDefault();
 	var name = get('newname').value;
-	get('newname').value = '';
 	var select = get('animation');
 	var option = select.selectedOptions[0];
 	var old_name = option.value;
-	// TODO: make name unique.
+	// Make name unique.
+	var newname = name;
+	var i = 0;
+	while (newname != old_name && gani[newname] !== undefined) {
+		newname = name + '-' + i;
+		i += 1;
+	}
+	get('newname').value = newname;
 	// Replace content and set value.
-	option.ClearAll().AddText(name).value = name;
+	option.ClearAll().AddText(newname).value = newname;
 	select = get('setbackto');
 	for (var o = 0; o < select.options.length; ++o) {
 		if (select.options[o].value == old_name) {
 			// Replace content and set value.
-			select.options[o].ClearAll().AddText(name).value = name;
+			select.options[o].ClearAll().AddText(newname).value = newname;
 		}
 	}
 	for (var g in gani) {
 		if (gani[g].setbackto == old_name)
-			gani[g].setbackto = name;
+			gani[g].setbackto = newname;
 	}
 	var ani = gani[old_name];
 	delete gani[old_name];
-	gani[name] = ani;
+	gani[newname] = ani;
 }
 
 // This function is called when the "create resource" button is pressed.
@@ -876,8 +959,14 @@ function new_time() {
 }
 
 // This functin is called when the "new frame" button is clicked.
-function newframe() {
-	// TODO: Add new frame.
+function change_num_frames() {
+	// TODO: Add or remove frames.
+	var num_frames = Number(get('numframes').value);
+	// Weird notation to make sure non-numbers will be corrected as well.
+	if (!(num_frames > 0)) {
+		num_frames = current.frames.length;
+		get('numframes').value = num_frames;
+	}
 }
 
 // This function is called when a new frame is selected.

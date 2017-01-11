@@ -47,6 +47,19 @@
 .box {
 	border: solid blue 2px;
 	position: absolute;
+	padding: 2px 2px;
+}
+
+.selectedcell {
+	border: solid red 1px;
+	position: absolute;
+	z-index: 10;
+}
+
+.cell {
+	border: dotted grey 1px;
+	position: absolute;
+	z-index: 1;
 }
 
 .container {
@@ -55,4 +68,9 @@
 
 input[type=number] {
 	width: 8ex;
+}
+
+td, th {
+	margin: 1ex 1ex;
+	background: rgba(0, 0, 0, 0.04);
 }
