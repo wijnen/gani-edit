@@ -33,14 +33,8 @@
 			<input type='checkbox' class='expander' id='spriteexpander'/>
 			<label for='spriteexpander'><b>Sprite Definitions</b></label>
 			<div class='expanding'>
-				<table id='spritelist'>
-					<!-- (resource head, remove button
-						(sprite name, x, y, w, h, default file, remove button)*
-						Add sprite button
-						)*
-					-->
-					<tr id='newresource'><td colspan='6'><button type='button' onclick='createresource()'>Create Resource</button></td></tr>
-				</table>
+				<div id='sprites'></div>
+				<div><button type='button' onclick='createresource()'>Create Resource</button></div>
 			</div>
 		</div><!--}}}-->
 
@@ -51,7 +45,7 @@
 				Number of Frames: <input type='number' min='1' id='numframes' onchange='change_num_frames()'/><br/>
 				Frame: <input type='range' min='0' step='1' max='0' id='frameselect' oninput='update_frame()'/> <span id='framenum'></span><br/>
 				Hold Time: <input id='time' type='number' min='50' max='10000' value='50' step='50' oninput='new_time()'/> ms<br/>
-				Sound: <select id='sound'></select> <button type='button' onclick='playsound()'>Play</button><br/>
+				Audio: <select id='audio'></select> <button type='button' onclick='playsound()'>Play</button><br/>
 				<table id='frames'>
 					<tr><th rowspan='2'>Resource</th><th colspan='3'>Up/Single</th><th colspan='3'>Left</th><th colspan='3'>Down</th><th colspan='3'>Right</th></tr>
 					<tr>
