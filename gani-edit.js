@@ -244,6 +244,8 @@ function Animation(name) {
 			}
 			if (frame.hold_time != this.default_hold)
 				ret += 'WAIT ' + (frame.hold_time / this.default_hold - 1) + '\n';
+			if (frame.audio !== false)
+				ret += 'PLAYSOUND ' + audiofiles[frame.audio] + ' 0 0\n';
 			ret += '\n';
 		}
 		ret += 'ANIEND\n';
@@ -488,7 +490,17 @@ function Frame(animation, base) {
 	this.animation.frames.push(this);
 	this.data = base.data;
 	this.hold_time = base.hold_time;
-	this.audio = base.audio;
+	if (base.sound === false)
+		this.audio = false;
+	else {
+		var index = audiofiles.indexOf(base.sound[0]);
+		if (index < 0) {
+			console.info(this.animation.name, 'Ignoring use of undefined audio file', base.sound);
+			this.audio = false;
+		}
+		else
+			this.audio = index;
+	}
 	this.remove = function() {
 		this.animation.frames.splice(this.index, 1);
 		for (var i = this.index; i < this.animation.frames.length; ++i)
@@ -559,6 +571,10 @@ function loadend() {
 		}
 		get('setbackto').AddElement('option').AddText(animations[a].name).value = a;
 	}
+	// Set up options for audiofiles.
+	var audioselect = get('audio');
+	for (var a = 0; a < audiofiles.length; ++a)
+		audioselect.AddElement('option').AddText(audiofiles[a]).value = audiofiles[a];
 	// This loads the new animation into the interface.
 	select_animation();
 	start_time = performance.now();
@@ -1131,6 +1147,24 @@ function save() {
 	var event = document.createEvent('MouseEvents');
 	event.initEvent('click', true, true);
 	a.dispatchEvent(event);
+}
+
+// This function is called when the audio control is changed.
+function set_audio() {
+	var num = get('audio').selectedIndex;
+	var frame = Number(get('frameselect').value);
+	current.frames[frame].sound = (num == 0 ? false : [audiofiles[num - 1], 0, 0]);
+	current.frames[frame].audio = (num == 0 ? false : num - 1);
+}
+
+// This function is called when the "play" button is clicked.
+function playsound() {
+	var file = get('audio').value;
+	if (file == '')
+		return;
+	var player = get('player');
+	player.src = 'audio/' + file;
+	player.play();
 }
 // }
 
