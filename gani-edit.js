@@ -27,7 +27,6 @@ Resource = {
 	sprites: [ Sprite(), ... ],	// sprites that are defined for this resource.
 	li: li,				// html element in parent.ui_sprites.
 	name_input: input,		// html element for name change.
-	remove: button,			// resource remove button.
 	image_select: select,		// html element to select default image.
 	box: div,			// html element to show selected sprites on image.
 	img: img,			// html element to show selected default image.
@@ -39,6 +38,7 @@ Resource = {
 	frame_x: [ input ] * 4,		// html elements for selecting x of frame.
 	frame_y: [ input ] * 4,		// html elements for selecting y of frame.
 
+	remove: function(),		// remove this resource.
 	ui_update: function(),		// reflect changes in underlying data in the UI.
 	update_box: function(),		// redraw the box that shows the selected sprite.
 };
@@ -103,33 +103,23 @@ var default_hold = 50;
 function Animation(name) {
 	this.name = name;
 	this.index = animations.length;
+	get('animation').AddElement('option').AddText(name).value = this.index;
+	get('setbackto').AddElement('option').AddText(name).value = this.index;
 	animations.push(this);
-	// Data members of this object: {
-	this.name = name;
-	this.resources = [];
-	this.default_hold = default_hold;
-	this.duration = 0;
-	this.single_dir = false;
-	this.setbackto = false;
-	this.frames = [];
-	this.ui_sprites = Create('div'); // {
-	this.ui_sprites.ul = this.ui_sprites.AddElement('ul');
-	// }
-	this.ui_frames = []; // This is a list of tr elements.
-	// }
 	// Methods. {
 	// Hide previous animation and show this one in the interface.
+	this.ui_deselect = function() {
+		get('sprites').ClearAll();
+		for (var i = 0; i < this.ui_frames.length; ++i)
+			this.ui_frames[i].parentNode.removeChild(this.ui_frames[i]);
+	};
 	this.ui_select = function() {
+		get('animation').selectedIndex = this.index;
 		get('sprites').Add(this.ui_sprites);
 		var table = get('frames');
 		for (var i = 0; i < this.ui_frames.length; ++i)
 			table.Add(this.ui_frames[i]);
 		this.ui_update();
-	};
-	this.ui_deselect = function() {
-		get('sprites').ClearAll();
-		for (var i = 0; i < this.ui_frames.length; ++i)
-			this.ui_frames[i].parentNode.removeChild(this.ui_frames[i]);
 	};
 	// Update the UI to reflect state of variables.
 	this.ui_update = function() {
@@ -231,7 +221,6 @@ function Animation(name) {
 		for (var f = 0; f < this.frames.length; ++f) {
 			var frame = this.frames[f];
 			for (var d = 0; d < (this.single_dir ? 1 : 4); ++d) {
-				console.info(frame, d);
 				var data = frame.data[d];
 				sep = '';
 				for (var r = 0; r < data.length; ++r) {
@@ -252,51 +241,92 @@ function Animation(name) {
 		return ret;
 	};
 	// }
+	// Data members of this object: {
+	this.name = name;
+	this.default_hold = default_hold;
+	this.duration = 0;
+	this.single_dir = false;
+	this.setbackto = false;
+	this.ui_sprites = Create('div'); // {
+	this.ui_sprites.ul = this.ui_sprites.AddElement('ul');
+	// }
+	this.ui_frames = []; // This is a list of tr elements.
+	// Create members before filling them.
+	this.resources = [];
+	this.frames = [];
+	new Resource(this, 'sprite');
+	new Frame(this, null);
+	// }
 }
 
 function Resource(animation, name) {
 	this.animation = animation;
 	this.index = this.animation.resources.length;
 	this.animation.resources.push(this);
-	this.name = name;
-	this.sprites = [];
-	this.li = animation.ui_sprites.ul.AddElement('li');
-	this.li.AddText('Resource: ');
-	this.name_input = this.li.AddElement('input');
-	this.name_input.type = 'text';
-	this.name_input.resource = this;
-	this.name_input.AddEvent('keydown', function(event) {
-		if (event.keyCode != 13)
-			return;
-		event.preventDefault();
-		this.resource.name = this.value;
-		this.resource.animation.ui_update();
-	});
-	this.remove = this.li.AddElement('button').AddText('Remove').AddEvent('click', function() {
+	this.name = name.toLowerCase();
+	this.remove = function() {
 		// Remove resource.
-		while (this.resource.sprites.length > 0)
-			this.resource.sprites[0].remove();
-		this.resource.li.parentNode.removeChild(this.resource.li);
-		this.resource.animation.resources.splice(this.resource.index, 1);
-		for (var i = this.resource.index; i < this.resource.animation.resources.length; ++i)
-			this.resource.animation.resources[i].index -= 1;
-	});
-	this.remove.type = 'button';
-	this.remove.resource = this;
-	this.li.AddElement('br');
-	this.image_select = this.li.AddElement('select');
-	for (var i = 0; i < imgfiles.length; ++i)
-		this.image_select.AddElement('option').AddText(imgfiles[i]).value = i;
-	this.image_select.AddEvent('change', function() {
-		this.resource.file = this.selectedOptions[0].value;
-		this.resource.ui_update();
-	});
-	this.image_select.resource = this;
-	this.li.AddElement('br');
-	var container = this.li.AddElement('div', 'container');
-	this.box = container.AddElement('div', 'box');
-	this.img = container.AddElement('img');
-	this.img.src = 'img/' + this.file;
+		while (this.sprites.length > 0)
+			this.sprites[0].remove();
+		this.li.parentNode.removeChild(this.li);
+		this.animation.ui_frames.splice(this.index, 1);
+		this.animation.resources.splice(this.index, 1);
+		for (var i = this.index; i < this.animation.resources.length; ++i)
+			this.animation.resources[i].index -= 1;
+		for (var f = 0; f < this.animation.frames.length; ++f) {
+			var frame = this.animation.frames[f].data;
+			for (var d = 0; d < 4; ++d)
+				frame[d].splice(this.index, 1);
+		}
+		if (current === this.animation)
+			this.animation.ui_update();
+	}
+	this.ui_update = function() {
+		// Update name.
+		this.name_input.value = this.name;
+		this.frame_name.ClearAll().AddText(this.name);
+		// Update image and box.
+		this.image_select.selectedIndex = this.file;
+		this.img.src = 'img/' + imgfiles[this.file];
+		this.update_box();
+		// Update sprites.
+		var num_sprites = 0;
+		this.selectvalues = [];
+		for (var i = 0; i < this.sprites.length; ++i) {
+			this.sprites[i].selectindex = num_sprites;
+			num_sprites += this.sprites[i].num_x * this.sprites[i].num_y;
+			this.sprites[i].ui_update();
+			for (var x = 0; x < this.sprites[i].num_x; ++x) {
+				for (var y = 0; y < this.sprites[i].num_y; ++y) {
+					this.selectvalues.push([i, x, y, this.sprites[i].name + x * this.sprites[i].dx + y]);
+				}
+			}
+		}
+		this.select.max = num_sprites - 1;
+		// Update frame data.
+		var framenum = get('frameselect').value;
+		var xy = ['x', 'y'];
+		for (var d = 0; d < 4; ++d) {
+			for (var f = 0; f < this.animation.frames.length; ++f)
+			var sprite = this.animation.frames[framenum].data[d][this.index].sprite;
+			this.frame_sprite[d].ClearAll();
+			for (var s = 0; s < this.sprites.length; ++s) {
+				var spr_obj = this.sprites[s];
+				for (var x = 0; x < spr_obj.num_x; ++x) {
+					for (var y = 0; y < spr_obj.num_y; ++y) {
+						var num = spr_obj.name + x * spr_obj.dx + y;
+						var option = this.frame_sprite[d].AddElement('option').AddText(num);
+						option.value = num;
+						option.data = [s, x, y];
+						if (s == sprite[0] && x == sprite[1] && y == sprite[2])
+							this.frame_sprite[d].selectedIndex = this.frame_sprite[d].options.length - 1;
+					}
+				}
+			}
+			for (var c = 0; c < xy.length; ++c)
+				this['frame_' + xy[c]][d].value = this.animation.frames[framenum].data[d][this.index][xy[c]];
+		}
+	};
 	this.update_box = function() {
 		var selected = this.selectvalues[this.select.value];
 		if (selected === undefined)
@@ -320,6 +350,36 @@ function Resource(animation, name) {
 			}
 		}
 	};
+	this.li = animation.ui_sprites.ul.AddElement('li');
+	this.li.AddText('Resource: ');
+	this.name_input = this.li.AddElement('input');
+	this.name_input.type = 'text';
+	this.name_input.resource = this;
+	this.name_input.AddEvent('keydown', function(event) {
+		if (event.keyCode != 13)
+			return;
+		event.preventDefault();
+		this.resource.name = this.value;
+		this.resource.animation.ui_update();
+	});
+	var button = this.li.AddElement('button').AddText('Remove').AddEvent('click', function() { this.resource.remove(); });
+	button.type = 'button';
+	button.resource = this;
+	this.li.AddElement('br');
+	this.image_select = this.li.AddElement('select');
+	for (var i = 0; i < imgfiles.length; ++i)
+		this.image_select.AddElement('option').AddText(imgfiles[i]).value = i;
+	this.image_select.AddEvent('change', function() {
+		this.resource.file = this.selectedOptions[0].value;
+		this.resource.ui_update();
+	});
+	this.image_select.resource = this;
+	this.li.AddElement('br');
+	var container = this.li.AddElement('div', 'container');
+	this.box = container.AddElement('div', 'box');
+	this.file = 0;
+	this.img = container.AddElement('img');
+	this.img.src = 'img/' + imgfiles[this.file];
 	// Sprite selection in Sprite properties frame.
 	this.select = this.li.AddElement('input').AddEvent('input', function() {
 		this.resource.update_box();
@@ -346,7 +406,7 @@ function Resource(animation, name) {
 	e.type = 'button';
 	e.resource = this;
 
-	// Add resource to frames.
+	// Add resource to frame ui.
 	tr = Create('tr');
 	this.animation.ui_frames.push(tr);
 	this.frame_name = tr.AddElement('th');
@@ -375,102 +435,31 @@ function Resource(animation, name) {
 			e.type = 'number';
 			e.resource = this;
 			e.c = xy[c];
-			e.dir = d;
+			e.d = d;
 			e.AddEvent('input', function() {
 				// Update animation data.
 				var framenum = get('frameselect').value;
 				var frame = this.resource.animation.frames[framenum];
-				frame[this.dir][this.c] = this.value;
+				frame.data[this.d][this.resource.index][this.c] = Number(this.value);
 				this.resource.animation.ui_update();
 			});
 		}
 	}
-
-	this.ui_update = function() {
-		// Update name.
-		this.name_input.value = this.name;
-		this.frame_name.ClearAll().AddText(this.name);
-		// Update image and box.
-		this.image_select.selectedIndex = this.file;
-		this.img.src = 'img/' + imgfiles[this.file];
-		this.update_box();
-		// Update sprites.
-		var num_sprites = 0;
-		this.selectvalues = [];
-		for (var i = 0; i < this.sprites.length; ++i) {
-			this.sprites[i].selectindex = num_sprites;
-			num_sprites += this.sprites[i].num_x * this.sprites[i].num_y;
-			this.sprites[i].ui_update();
-			for (var x = 0; x < this.sprites[i].num_x; ++x) {
-				for (var y = 0; y < this.sprites[i].num_y; ++y) {
-					this.selectvalues.push([i, x, y, this.sprites[i].name + x * this.sprites[i].dx + y]);
-				}
-			}
-		}
-		this.select.max = num_sprites - 1;
-		// Update frame data.
-		var framenum = get('frameselect').value;
-		var xy = ['x', 'y'];
-		for (var d = 0; d < 4; ++d) {
-			var sprite = this.animation.frames[framenum].data[d][this.index].sprite;
-			this.frame_sprite[d].ClearAll();
-			for (var s = 0; s < this.sprites.length; ++s) {
-				var spr_obj = this.sprites[s];
-				for (var x = 0; x < spr_obj.num_x; ++x) {
-					for (var y = 0; y < spr_obj.num_y; ++y) {
-						var num = spr_obj.name + x * spr_obj.dx + y;
-						var option = this.frame_sprite[d].AddElement('option').AddText(num);
-						option.value = num;
-						option.data = [s, x, y];
-						if (s == sprite[0] && x == sprite[1] && y == sprite[2])
-							this.frame_sprite[d].selectedIndex = this.frame_sprite[d].options.length - 1;
-					}
-				}
-			}
-			for (var c = 0; c < xy.length; ++c)
-				this['frame_' + xy[c]][d].value = this.animation.frames[framenum].data[d][this.index][xy[c]];
-		}
-	};
+	// Add resource to frame data.
+	for (var f = 0; f < this.animation.frames.length; ++f) {
+		var frame = this.animation.frames[f].data;
+		for (var d = 0; d < 4; ++d)
+			frame[d].push({sprite: [0, 0, 0], x: 0, y: 0});
+	}
+	// this.sprites must exist for new Sprite, so don't create and fill in one step.
+	this.sprites = [];
+	new Sprite(this, 100);
 }
 
 function Sprite(resource, name) {
 	this.resource = resource;
 	this.index = this.resource.sprites.length;
 	this.resource.sprites.push(this);
-	this.tr = this.resource.table.AddElement('tr');
-	var td = this.tr.AddElement('td');
-	var e = td.AddElement('button').AddText('Show').AddEvent('click', function() {
-		var select = this.sprite.resource.select;
-		this.sprite.resource.select.value = this.sprite.selectindex;
-		this.sprite.resource.update_box();
-	});
-	e.type = 'button';
-	e.sprite = this;
-
-	this.attrs = ['name', 'x', 'y', 'w', 'h', 'num_x', 'num_y', 'hint'];
-	this.cells = [];
-	for (var i = 0; i < this.attrs.length; ++i) {
-		td = this.tr.AddElement('td');
-		this.cells.push(td.AddElement('input'));
-		if (i < 7)
-			this.cells[i].type = 'number';
-		this.cells[i].sprite = this;
-		this.cells[i].attr = this.attrs[i];
-		this[this.attrs[i]] = 0;
-		this.cells[i].AddEvent('change', function() {
-			this.sprite[this.attr] = (this.attr != 'hint' ? Number(this.value) : this.value);
-			this.sprite.resource.animation.ui_update();
-		});
-	}
-	this.name = name;
-	this.hint = 'Frame';
-
-	td = this.tr.AddElement('td');
-	e = td.AddElement('button').AddText('Remove').AddEvent('click', function() {
-		this.sprite.remove();
-	});
-	e.sprite = this;
-	e.type = 'button';
 	this.remove = function() {
 		this.tr.parentNode.removeChild(this.tr);
 		this.resource.sprites.splice(this.index, 1);
@@ -482,24 +471,69 @@ function Sprite(resource, name) {
 		for (var i = 0; i < this.attrs.length; ++i)
 			this.cells[i].value = this[this.attrs[i]];
 	};
+	this.tr = this.resource.table.AddElement('tr');
+	var td = this.tr.AddElement('td');
+	var e = td.AddElement('button').AddText('Show').AddEvent('click', function() {
+		var select = this.sprite.resource.select;
+		this.sprite.resource.select.value = this.sprite.selectindex;
+		this.sprite.resource.update_box();
+	});
+	e.type = 'button';
+	e.sprite = this;
+
+	this.attrs = ['name', 'x', 'y', 'w', 'h', 'num_x', 'num_y', 'hint'];
+	var values = [name, 0, 0, 32, 32, 1, 1, 'Frame'];
+	this.cells = [];
+	for (var i = 0; i < this.attrs.length; ++i) {
+		td = this.tr.AddElement('td');
+		this.cells.push(td.AddElement('input'));
+		if (i < 7)
+			this.cells[i].type = 'number';
+		this.cells[i].sprite = this;
+		this.cells[i].attr = this.attrs[i];
+		this[this.attrs[i]] = values[i];
+		this.cells[i].AddEvent('change', function() {
+			this.sprite[this.attr] = (this.attr != 'hint' ? Number(this.value) : this.value);
+			this.sprite.resource.animation.ui_update();
+		});
+	}
+
+	td = this.tr.AddElement('td');
+	e = td.AddElement('button').AddText('Remove').AddEvent('click', function() {
+		this.sprite.remove();
+	});
+	e.sprite = this;
+	e.type = 'button';
 }
 
 function Frame(animation, base) {
 	this.animation = animation;
 	this.index = this.animation.frames.length;
 	this.animation.frames.push(this);
-	this.data = base.data;
-	this.hold_time = base.hold_time;
-	if (base.sound === false)
+	if (base === null) {
+		this.hold_time = default_hold;
 		this.audio = false;
-	else {
-		var index = audiofiles.indexOf(base.sound[0]);
-		if (index < 0) {
-			console.info(this.animation.name, 'Ignoring use of undefined audio file', base.sound);
-			this.audio = false;
+		this.data = [[], [], [], []];
+		for (var d = 0; d < 4; ++d) {
+			for (var r = 0; r < this.animation.resources.length; ++r)
+				this.data[d].push({sprite: [0, 0, 0], x: 0, y: 0});
 		}
-		else
-			this.audio = index;
+	}
+	else {
+		// This would need a deep copy, but base is discarded after this call, so this is fine.
+		this.data = base.data;
+		this.hold_time = base.hold_time;
+		if (base.sound === false)
+			this.audio = false;
+		else {
+			var index = audiofiles.indexOf(base.sound[0]);
+			if (index < 0) {
+				console.info(this.animation.name, 'Ignoring use of undefined audio file', base.sound);
+				this.audio = false;
+			}
+			else
+				this.audio = index;
+		}
 	}
 	this.remove = function() {
 		this.animation.frames.splice(this.index, 1);
@@ -555,7 +589,6 @@ function loadend() {
 	// All files are loaded.
 	for (var a = 0; a < animations.length; ++a) {
 		animations[a].index = a;
-		get('animation').AddElement('option').AddText(animations[a].name).value = a;
 		if (typeof(animations[a].setbackto) != 'boolean') {
 			outer: while (true) {
 				for (var i = 0; i < animations.length; ++i) {
@@ -569,7 +602,6 @@ function loadend() {
 				break;
 			}
 		}
-		get('setbackto').AddElement('option').AddText(animations[a].name).value = a;
 	}
 	// Set up options for audiofiles.
 	var audioselect = get('audio');
@@ -833,12 +865,16 @@ function parse_gani(name, gani_text) {
 
 	// Create animation object.
 	var ani = new Animation(name);
+	// Remove default resource.
+	ani.resources[0].remove();
 	ani.single_dir = single_dir;
 	ani.setbackto = setbackto;	// Animation names will be changed to indices in loadend.
 	// Add sprites to resource objects, in order.
 	for (var i = 0; i < resource_names.length; ++i) {
 		var resource = resources[resource_names[i]];
 		var r = new Resource(ani, resource_names[i]);
+		// Remove default sprite.
+		r.sprites[0].remove();
 		r.file = resource.file;
 		var names = [];
 		for (var s in resource.sprites)
@@ -865,6 +901,7 @@ function parse_gani(name, gani_text) {
 			}
 		}
 	}
+	ani.frames[0].remove();	// Remove the default first frame.
 	for (var f = 0; f < frames.length; ++f)
 		new Frame(ani, frames[f]);
 	ani.compute_timings();
@@ -875,6 +912,7 @@ function parse_gani(name, gani_text) {
 function animate() {
 	timeout = null;
 	if (current === null) {
+		timeout = setTimeout(animate, 100);
 		return;
 	}
 	if (current_animation === null) {
@@ -926,6 +964,11 @@ function animate() {
 		set_frame(current_animation, current_frame);
 	// TODO: The above is wrong for freeze time.
 	requestAnimationFrame(function() {
+		if (current_animation === null || current_animation.frames[current_frame] === undefined) {
+			// The animation is not currently running for some reason, but schedule the next update anyway.
+			timeout = setTimeout(animate, 100);
+			return;
+		}
 		var dt = current_animation.frames[current_frame].time + current_animation.frames[current_frame].hold_time - (performance.now() - start_time);
 		timeout = setTimeout(animate, dt > 0 ? dt : 0);
 	});
@@ -990,7 +1033,8 @@ function set_frame(animation, frame, frame_preview) {
 	for (var dir = 0; dir < dirs.length; ++dir) {
 		r.push([]);
 		if (animation.frames[frame] === undefined) {
-			console.error('no frame', frame, animation.frames);
+			if (frame > 0)
+				console.error('no frame', frame, animation.frames);
 			continue;
 		}
 		var d = animation.frames[frame].data[dir];
@@ -999,6 +1043,8 @@ function set_frame(animation, frame, frame_preview) {
 		for (var i = 0; i < d.length; ++i) {
 			var resource = animation.resources[i];
 			var s = d[i].sprite;
+			if (s === undefined)
+				return;
 			var sprite = resource.sprites[s[0]];
 			r[dir].push(parent.AddElement('div', 'part'));
 			var part = r[dir][i];
@@ -1034,6 +1080,18 @@ function select_animation() {
 	if (ani.options.length <= ani.selectedIndex)
 		return;
 	set_animation(ani.selectedOptions[0].value);
+}
+
+// This function is called when a new setbackto control is selected.
+function set_type() {
+	if (get('loop').checked)
+		current.setbackto = true;
+	else if (get('freeze').checked)
+		current.setbackto = false;
+	else if (get('setback').checked)
+		current.setbackto = Number(get('setbackto').selectedOptions[0].value);
+	else
+		console.error('set_type called but none of the controls is checked');
 }
 
 // This function is called when a key is pressed in the name input box.
@@ -1073,9 +1131,21 @@ function namekey(event) {
 	current.name = newname;
 }
 
+// This function is called when the "create animation" button is pressed.
+function create_animation() {
+	if (current !== null)
+		current.ui_deselect();
+	current = new Animation('Animation');
+	current.compute_timings();
+	current.ui_select();
+}
+
 // This function is called when the "create resource" button is pressed.
-function createresource() {
-	// TODO: Add new resource.
+function create_resource() {
+	current.ui_deselect();
+	new Resource(current, 'sprite');
+	current.ui_select();
+	current.ui_update();
 }
 
 // This function is called when the value of the hold time is changed.
@@ -1103,16 +1173,22 @@ function change_num_frames() {
 			selected_frame = current.frames.length - 1;
 	}
 	while (num_frames > current.frames.length) {
-		var data = [];
 		var src = current.frames[selected_frame];
-		for (var i = 0; i < src.data.length; ++i)
-			data.push(new_frame_data(src.data[i]));
-		var obj = {data: data};
-		for (var i in src) {
-			if (i != 'data')
-				obj[i] = src[i];
+		if (src !== undefined)  {
+			var data = [];
+			var obj = {data: data};
+			for (var i = 0; i < src.data.length; ++i)
+				data.push(new_frame_data(src.data[i]));
+			for (var i in src) {
+				if (i != 'data')
+					obj[i] = src[i];
+			}
+			current.frames = current.frames.slice(0, selected_frame).concat([obj], current.frames.slice(selected_frame));
 		}
-		current.frames = current.frames.slice(0, selected_frame).concat([obj], current.frames.slice(selected_frame));
+		else {
+			// This is the first frame; there are no resources yet.
+			current.frames = [];
+		}
 	}
 	// Update times.
 	var t = 0;
@@ -1122,6 +1198,7 @@ function change_num_frames() {
 	}
 	get('frameselect').max = current.frames.length - 1;
 	get('frameselect').value = selected_frame;
+	current.compute_timings();
 }
 
 // This function is called when the single direction checkbox is toggled.
@@ -1134,7 +1211,8 @@ function set_direction() {
 function update_frame() {
 	var frame = Number(get('frameselect').value);
 	get('framenum').ClearAll().AddText(frame);
-	current.frames[frame].ui_update();
+	if (current.frames[frame] !== undefined)
+		current.frames[frame].ui_update();
 	set_frame(current, frame, true);
 }
 
